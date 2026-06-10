@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Transport - Prévisions 2025 (Matin)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Proj4js for Lambert 93/CC45 conversions -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .leaflet-container {
+            background-color: #f8fafc;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- ÉCRAN DE CHARGEMENT -->
+    <div id="loader-overlay" class="fixed inset-0 bg-slate-900/90 z-[9999] flex flex-col items-center justify-center text-white p-6 transition-opacity duration-500">
+        <div class="max-w-md w-full text-center space-y-6">
+            <div class="flex justify-center">
+                <div class="relative w-20 h-20">
+                    <div class="absolute inset-0 rounded-full border-4 border-emerald-500/20"></div>
+                    <div class="absolute inset-0 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"></div>
+                </div>
+            </div>
+            <h1 class="text-2xl font-bold tracking-tight">Plateforme d'Analyse Mobilité 2025</h1>
+            <p class="text-slate-400 text-sm">Chargement et traitement en direct des bases de données transports...</p>
+            
+            <div class="bg-slate-800 rounded-lg p-4 text-left font-mono text-xs space-y-2 text-emerald-400 border border-slate-700">
+                <div id="status-csv" class="flex justify-between items-center">
+                    <span>• Base ZONE_2025 (CSV)...</span>
+                    <span class="text-amber-400 font-bold" id="badge-csv">Attente</span>
+                </div>
+                <div id="status-shp" class="flex justify-between items-center">
+                    <span>• Géométries Matin_2025 (SHP)...</span>
+                    <span class="text-amber-400 font-bold" id="badge-shp">Attente</span>
+                </div>
+                <div id="status-att" class="flex justify-between items-center">
+                    <span>• Matrice OD_PM_2025 (ATT)...</span>
+                    <span class="text-amber-400 font-bold" id="badge-att">Attente</span>
+                </div>
+            </div>
+
+            <!-- Fallback Zone d'importation si échec -->
+            <div id="fallback-upload" class="hidden space-y-4 bg-slate-800 p-4 rounded-lg border border-red-500/30 text-slate-300">
+                <p class="text-sm text-red-400 font-semibold">Certains fichiers locaux n'ont pas pu être chargés automatiquement dans cet environnement d'exécution. Veuillez les glisser-déposer ci-dessous :</p>
+                <div class="border-2 border-dashed border-slate-600 hover:border-emerald-500 rounded p-4 text-center cursor-pointer transition" onclick="document.getElementById('manual-files').click()">
+                    <span class="text-xs">Cliquez pour importer ZONE_2025.csv, Matin_2025_Shape_zone.shp ou OD_PM_2025_matin.att</span>
+                    <input type="file" id="manual-files" multiple class="hidden" onchange="handleManualFiles(event)">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- EN-TÊTE PRINCIPALE -->
+    <header class="bg-slate-900 text-white px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="p-2.5 bg-emerald-600 rounded-lg text-white">
+                <i data-lucide="map-pin" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight">Visualisation des Déplacements • Matin 2025</h1>
+                <p class="text-xs text-slate-400">Modèle de trafic, analyse multimodale & parts modales territoriales</p>
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm">
+            <div class="bg-slate-800/80 px-3 py-1.5 rounded border border-slate-700">
+                <span class="text-slate-400 mr-1.5">Zones :</span> <span id="header-nb-zones" class="font-semibold text-emerald-400">-</span>
+            </div>
+            <div class="bg-slate-800/80 px-3 py-1.5 rounded border border-slate-700">
+                <span class="text-slate-400 mr-1.5">Communes :</span> <span id="header-nb-communes" class="font-semibold text-emerald-400">-</span>
+            </div>
+            <div class="bg-slate-800/80 px-3 py-1.5 rounded border border-slate-700">
+                <span class="text-slate-400 mr-1.5">Total Déplacements :</span> <span id="header-total-trips" class="font-semibold text-emerald-400">-</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ZONE PRINCIPALE (CARTE + SIDEBARS) -->
+    <main class="flex-1 flex overflow-hidden relative">
+
+        <!-- SIDEBAR GAUCHE : PARAMÈTRES ET SÉLECTION -->
+        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col overflow-hidden shrink-0 z-10 shadow-sm">
+            <!-- Onglets de Configuration -->
+            <div class="p-4 border-b border-slate-100 space-y-4">
+                <div>
+                    <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Échelle d'analyse</label>
+                    <div class="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-lg">
+                        <button id="btn-scale-zone" onclick="setScale('zone')" class="py-1.5 text-xs font-medium rounded-md transition text-slate-700 bg-white shadow-sm">
+                            Zones de Trafic
+                        </button>
+                        <button id="btn-scale-commune" onclick="setScale('commune')" class="py-1.5 text-xs font-medium rounded-md transition text-slate-600 hover:text-slate-900">
+                            Communes
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Coloration de la Carte</label>
+                    <select id="map-variable" onchange="updateChoropleth()" class="w-full text-xs bg-slate-50 border border-slate-200 rounded-md p-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <option value="none">Aucune (Géométrie simple)</option>
+                        <option value="pop" selected>Population Totale</option>
+                        <option value="emplois">Emplois Totaux</option>
+                        <option value="emis">Flux émis (Départ)</option>
+                        <option value="recus">Flux reçus (Arrivée)</option>
+                        <option value="pm_car">Part Modale Voiture (%)</option>
+                        <option value="pm_tc">Part Modale Transports en Commun (%)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Filtres & Liste des Communes -->
+            <div class="flex-1 flex flex-col overflow-hidden">
+                <div class="p-4 border-b border-slate-100 bg-slate-50/50">
+                    <div class="relative">
+                        <input type="text" id="search-input" oninput="filterTerritories()" placeholder="Rechercher une zone ou commune..." class="w-full text-xs pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5"></i>
+                    </div>
+                </div>
+
+                <!-- Liste dynamique scrollable -->
+                <div id="territory-list" class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                    <!-- Rempli par JS -->
+                </div>
+            </div>
+
+            <!-- Pied de page Sidebar Ggauche -->
+            <div class="p-4 bg-slate-50 border-t border-slate-200 text-[10px] text-slate-400 space-y-1">
+                <div>Source données : ZONE_2025 & OD_PM_2025</div>
+                <div>Projection : EPSG:2154 (Lambert-93) ou EPSG:3945</div>
+            </div>
+        </aside>
+
+        <!-- CARTE CENTRALE -->
+        <section class="flex-1 relative h-full">
+            <div id="map" class="w-full h-full"></div>
+
+            <!-- LÉGENDE DU THÈME -->
+            <div id="legend" class="absolute bottom-6 right-6 bg-white/95 backdrop-blur-sm p-3.5 rounded-lg shadow-lg border border-slate-200 z-[1000] max-w-[240px] text-xs space-y-2">
+                <div class="font-semibold text-slate-700" id="legend-title">Légende</div>
+                <div id="legend-colors" class="space-y-1.5 text-slate-600">
+                    <!-- Généré dynamiquement -->
+                </div>
+            </div>
+
+            <!-- BOÎTE DE FILTRE DES FLUX OD -->
+            <div class="absolute top-4 right-4 bg-white/95 backdrop-blur-sm p-4 rounded-lg shadow-lg border border-slate-200 z-[1000] w-80 space-y-3.5 text-xs">
+                <div class="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span class="font-bold text-slate-800 flex items-center gap-1.5">
+                        <i data-lucide="git-commit" class="w-4 h-4 text-emerald-600"></i> Analyse des Échanges (OD)
+                    </span>
+                    <button id="btn-clear-od" onclick="clearActiveOD()" class="hidden text-red-500 hover:text-red-700 font-semibold flex items-center gap-0.5">
+                        <i data-lucide="x" class="w-3.5 h-3.5"></i> Effacer
+                    </button>
+                </div>
+                
+                <div id="od-setup-tip" class="text-slate-500 text-[11px] bg-slate-50 p-2 rounded">
+                    Sélectionnez ou cliquez sur un territoire pour afficher les lignes de désirabilité de ses flux de déplacements.
+                </div>
+
+                <div id="od-controls" class="hidden space-y-3">
+                    <div>
+                        <span class="font-semibold text-slate-600 block mb-1">Direction des flux :</span>
+                        <div class="grid grid-cols-2 gap-1.5 bg-slate-100 p-0.5 rounded-md">
+                            <button id="flow-dir-out" onclick="setFlowDirection('out')" class="py-1 text-[11px] font-medium rounded transition text-slate-700 bg-white shadow-sm">Émis (Origine)</button>
+                            <button id="flow-dir-in" onclick="setFlowDirection('in')" class="py-1 text-[11px] font-medium rounded transition text-slate-600">Reçus (Destination)</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-slate-600 font-semibold mb-1">
+                            <span>Flux minimal affiché :</span>
+                            <span id="flux-threshold-val" class="text-emerald-600 font-bold">10 dépl.</span>
+                        </div>
+                        <input type="range" id="flux-threshold" min="0" max="250" value="10" oninput="updateODFilter(this.value)" class="w-full accent-emerald-500">
+                        <span class="text-[10px] text-slate-400 block mt-0.5">Filtre les liaisons de faible volume pour la lisibilité de la carte.</span>
+                    </div>
+
+                    <div class="bg-slate-50 p-2.5 rounded border border-slate-100">
+                        <span class="text-[11px] text-slate-500">Flux affichés : <b id="od-displayed-count" class="text-slate-800">-</b> liaisons</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SIDEBAR DROITE : STATISTIQUES COMPLÈTES -->
+        <aside id="sidebar-stats" class="w-96 bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0 z-10 shadow-sm">
+            <div class="p-4 border-b border-slate-200 bg-slate-900 text-white flex justify-between items-center shrink-0">
+                <span class="font-bold text-sm tracking-wide uppercase flex items-center gap-2">
+                    <i data-lucide="bar-chart-2" class="w-4 h-4 text-emerald-400"></i> Fiche Territoriale
+                </span>
+                <span id="selected-type-badge" class="bg-emerald-500/20 text-emerald-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-emerald-500/30">Métropole</span>
+            </div>
+
+            <!-- Contenu Statistique -->
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+                <!-- Titre d'entité sélectionné -->
+                <div class="space-y-1 pb-4 border-b border-slate-100">
+                    <h2 id="selected-name" class="text-xl font-extrabold text-slate-800 leading-tight">Territoire Global</h2>
+                    <p id="selected-sub" class="text-xs text-slate-500 flex items-center gap-1">
+                        <i data-lucide="info" class="w-3.5 h-3.5"></i> Agglomération complète des données de la matrice
+                    </p>
+                </div>
+
+                <!-- Chiffres Clés (KPI) -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-100">
+                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Population</span>
+                        <div id="stat-pop" class="text-lg font-extrabold text-slate-800">-</div>
+                    </div>
+                    <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-100">
+                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Emplois</span>
+                        <div id="stat-emplois" class="text-lg font-extrabold text-slate-800">-</div>
+                    </div>
+                    <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-100">
+                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Émis (matin)</span>
+                        <div id="stat-total-emis" class="text-lg font-extrabold text-emerald-600">-</div>
+                    </div>
+                    <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-100">
+                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Reçus (matin)</span>
+                        <div id="stat-total-recus" class="text-lg font-extrabold text-sky-600">-</div>
+                    </div>
+                </div>
+
+                <!-- GRAPHIQUE DES PARTS MODALES -->
+                <div class="space-y-2.5">
+                    <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <i data-lucide="pie-chart" class="w-4 h-4 text-slate-400"></i> Répartition des Modes de Transport
+                    </h3>
+                    <div class="relative h-48 w-full bg-slate-50 rounded-lg p-2 flex items-center justify-center border border-slate-100">
+                        <canvas id="modalChart"></canvas>
+                    </div>
+                    <!-- Légende personnalisée détaillée -->
+                    <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div class="space-y-1">
+                            <span class="font-bold text-slate-700 block text-[10px] uppercase">Part Voiture</span>
+                            <div class="flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                                <span id="pm-val-voiture" class="font-bold text-slate-800">- %</span>
+                            </div>
+                            <span class="text-[10px] text-slate-400 block">(Conducteur + Passager + Covoiturage)</span>
+                        </div>
+                        <div class="space-y-1">
+                            <span class="font-bold text-slate-700 block text-[10px] uppercase">Part TC</span>
+                            <div class="flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                <span id="pm-val-tc" class="font-bold text-slate-800">- %</span>
+                            </div>
+                            <span class="text-[10px] text-slate-400 block">(Transports publics + P+R)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABLEAU DE BORD : TOP DESTINATIONS/ORIGINES -->
+                <div class="space-y-3">
+                    <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                        <span class="flex items-center gap-1.5"><i data-lucide="trending-up" class="w-4 h-4 text-slate-400"></i> Principales Échanges</span>
+                        <span class="text-[10px] text-slate-400 normal-case" id="top-exchanges-direction">Vers destinations</span>
+                    </h3>
+                    <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-50 text-slate-500 uppercase text-[10px] border-b border-slate-200">
+                                <tr>
+                                    <th class="px-3 py-2">Territoire</th>
+                                    <th class="px-3 py-2 text-right">Volume</th>
+                                    <th class="px-3 py-2 text-right">Voi %</th>
+                                    <th class="px-3 py-2 text-right">TC %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-od-tbody" class="divide-y divide-slate-100 text-slate-700">
+                                <!-- Rempli dynamiquement -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- MODULE DE GESTION DU CODE, PARSERS ET CONVERSIONS -->
+    <script>
+        // Initialisation de Lucide Icons
+        lucide.createIcons();
+
+        // variables Globales de données
+        let rawCsvData = "";
+        let rawShpData = null;
+        let rawAttData = "";
+
+        let zones = [];       // Liste complète des objets zones
+        let zoneMap = {};     // Map {num: zone} pour accès immédiat
+        let communes = [];    // Liste agrégée des communes
+        let communeMap = {};  // Map {nom_commune: commune}
+        let odMatrix = [];    // Tableau des lignes OD parsées de l'ATT
+
+        // Paramètres de l'application
+        let currentScale = 'zone'; // 'zone' ou 'commune'
+        let currentMapVariable = 'pop';
+        let activeODTerritory = null; // ID de la zone/commune sélectionnée pour afficher l'OD
+        let activeODDirection = 'out'; // 'out' (émis) ou 'in' (reçus)
+        let fluxThreshold = 10;
+
+        // Éléments de Carte Leaflet
+        let map;
+        let baseLayer;
+        let choroplethLayer;
+        let odFlowsLayer;
+        let activeSelectionLayer;
+
+        // Graphique ChartJS
+        let modalChartInstance = null;
+
+        // Définir les projections Lambert-93 (EPSG:2154) et Lambert CC45 (EPSG:3945)
+        proj4.defs("EPSG:2154", "+proj=lcc +lat_1=44 +lat_2=49 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+        proj4.defs("EPSG:3945", "+proj=lcc +lat_1=44.25 +lat_2=45.75 +lat_0=45 +lon_0=3 +x_0=1700000 +y_0=4200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+
+        // ----------------- DÉMARRAGE ET CHARGEMENT AUTOMATIQUE DES FICHIERS -----------------
+        window.addEventListener('load', async () => {
+            initMap();
+            initEmptyChart();
+
+            try {
+                // Étape 1 : Charger ZONE_2025.xlsx - Zones.csv
+                updateLoaderStatus('csv', 'Chargement...', 'amber');
+                const responseCsv = await fetch('ZONE_2025.xlsx - Zones.csv');
+                if (!responseCsv.ok) throw new Error('Impossible de charger le fichier ZONE_2025');
+                rawCsvData = await responseCsv.text();
+                updateLoaderStatus('csv', 'Succès', 'emerald');
+
+                // Étape 2 : Charger Matin_2025_Shape_zone.shp
+                updateLoaderStatus('shp', 'Chargement...', 'amber');
+                const responseShp = await fetch('Matin_2025_Shape_zone.shp');
+                if (!responseShp.ok) throw new Error('Impossible de charger le fichier SHP');
+                rawShpData = await responseShp.arrayBuffer();
+                updateLoaderStatus('shp', 'Succès', 'emerald');
+
+                // Étape 3 : Charger OD_PM_2025_matin.att
+                updateLoaderStatus('att', 'Chargement...', 'amber');
+                const responseAtt = await fetch('OD_PM_2025_matin.att');
+                if (!responseAtt.ok) throw new Error('Impossible de charger le fichier ATT');
+                rawAttData = await responseAtt.text();
+                updateLoaderStatus('att', 'Succès', 'emerald');
+
+                // Lancement du traitement
+                processData();
+
+            } catch (err) {
+                console.warn("Échec du chargement direct. Activation du chargement manuel.", err);
+                document.getElementById('fallback-upload').classList.remove('hidden');
+                document.querySelector('#loader-overlay p').innerHTML = "<span class='text-red-400 font-bold'>Attention : Fichiers manquants dans l'espace de travail.</span><br/>Veuillez charger manuellement les 3 fichiers ci-dessous.";
+            }
+        });
+
+        // Fonction pour gérer les importations manuelles par Drag & Drop ou sélecteur
+        async function handleManualFiles(event) {
+            const files = event.target.files;
+            for (let file of files) {
+                const name = file.name;
+                if (name.endsWith('.csv')) {
+                    updateLoaderStatus('csv', 'Lecture...', 'amber');
+                    rawCsvData = await file.text();
+                    updateLoaderStatus('csv', 'Chargé manuellement', 'emerald');
+                } else if (name.endsWith('.shp')) {
+                    updateLoaderStatus('shp', 'Lecture...', 'amber');
+                    rawShpData = await file.arrayBuffer();
+                    updateLoaderStatus('shp', 'Chargé manuellement', 'emerald');
+                } else if (name.endsWith('.att')) {
+                    updateLoaderStatus('att', 'Lecture...', 'amber');
+                    rawAttData = await file.text();
+                    updateLoaderStatus('att', 'Chargé manuellement', 'emerald');
+                }
+            }
+            if (rawCsvData && rawShpData && rawAttData) {
+                processData();
+            }
+        }
+
+        function updateLoaderStatus(id, text, colorClass) {
+            const badge = document.getElementById(`badge-${id}`);
+            if (badge) {
+                badge.innerText = text;
+                badge.className = `font-bold text-${colorClass}-400`;
+            }
+        }
+
+        // ----------------- PARSERS DES DONNÉES -----------------
+        function processData() {
+            try {
+                // 1. Parsing du CSV Zone
+                parseZonesCSV(rawCsvData);
+                
+                // 2. Parsing du Shapefile
+                const shapeResult = parseShapefile(rawShpData);
+
+                // 3. Attribution des formes géométriques aux zones
+                linkGeometries(shapeResult);
+
+                // 4. Parsing de la matrice OD
+                parseODMatrix(rawAttData);
+
+                // 5. Agrégation des indicateurs de flux et calcul des communes
+                aggregateData();
+
+                // 6. Rendu initial de l'application
+                document.getElementById('loader-overlay').classList.add('opacity-0');
+                setTimeout(() => {
+                    document.getElementById('loader-overlay').classList.add('hidden');
+                }, 500);
+
+                // Mettre à jour l'en-tête global
+                document.getElementById('header-nb-zones').innerText = zones.length;
+                document.getElementById('header-nb-communes').innerText = communes.length;
+                
+                const totalTripsSum = odMatrix.reduce((sum, d) => sum + d.total, 0);
+                document.getElementById('header-total-trips').innerText = formatNumber(Math.round(totalTripsSum));
+
+                // Centrer la carte sur le bounding box de l'étude
+                if (shapeResult.bbox) {
+                    const center = [
+                        (shapeResult.bbox.ymin + shapeResult.bbox.ymax) / 2,
+                        (shapeResult.bbox.xmin + shapeResult.bbox.xmax) / 2
+                    ];
+                    map.setView(center, 11);
+                }
+
+                // Initialiser l'affichage
+                setScale('zone');
+                updateChoropleth();
+                updateTerritoryList();
+                showGlobalStats();
+
+            } catch (error) {
+                console.error("Erreur durant le traitement des données :", error);
+                alert("Erreur de parsing des fichiers : " + error.message);
+            }
+        }
+
+        // Parser CSV des zones
+        function parseZonesCSV(text) {
+            zones = [];
+            zoneMap = {};
+            const lines = text.split(/\r?\n/);
+            let headersFound = false;
+            let headerIndices = {};
+
+            for (let line of lines) {
+                line = line.trim();
+                if (!line) continue;
+
+                if (line.includes('Num') && line.includes('COMMUNE')) {
+                    // Nettoyer la ligne d'en-tête (au cas où il y a un préfixe de type "Nombre: 843,")
+                    const cleanedHeader = line.replace(/^Nombre:\s*\d+,/, '');
+                    const cols = cleanedHeader.split(',');
+                    cols.forEach((col, idx) => {
+                        headerIndices[col.trim()] = idx;
+                    });
+                    headersFound = true;
+                    continue;
+                }
+
+                if (headersFound) {
+                    const cols = line.split(',');
+                    // Si la ligne commence par un index surnuméraire par rapport aux en-têtes
+                    let shift = 0;
+                    if (cols.length > Object.keys(headerIndices).length) {
+                        shift = cols.length - Object.keys(headerIndices).length;
+                    }
+
+                    const num = parseInt(cols[headerIndices['Num'] + shift]);
+                    const nom = cols[headerIndices['Nom'] + shift];
+                    const commune = cols[headerIndices['COMMUNE'] + shift];
+                    const pop = parseInt(cols[headerIndices['Population_totale'] + shift]) || 0;
+                    const emplois = parseInt(cols[headerIndices['EMPLOIS_TOTAUX'] + shift]) || 0;
+                    const epci = cols[headerIndices['EPCI'] + shift];
+                    const iris = cols[headerIndices['IRIS'] + shift];
+
+                    if (!isNaN(num)) {
+                        const zoneObj = {
+                            num,
+                            nom: nom ? nom.replace(/"/g, '') : `Zone ${num}`,
+                            commune: commune ? commune.trim() : 'Inconnu',
+                            pop,
+                            emplois,
+                            epci: epci ? epci.trim() : '',
+                            iris: iris ? iris.trim() : '',
+                            geometry: null,
+                            centroid: null,
+                            // Totaux cumulés plus tard
+                            totalEmis: 0,
+                            totalRecus: 0,
+                            modes: { walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 },
+                            outflows: [],
+                            inflows: []
+                        };
+                        zones.push(zoneObj);
+                        zoneMap[num] = zoneObj;
+                    }
+                }
+            }
+            zones.sort((a, b) => a.num - b.num);
+        }
+
+        // Parser du Shapefile (.shp uniquement)
+        function parseShapefile(arrayBuffer) {
+            const view = new DataView(arrayBuffer);
+            const fileCode = view.getInt32(0, false);
+            if (fileCode !== 9994) {
+                throw new Error("Ce fichier n'est pas un fichier Shapefile (.shp) valide.");
+            }
+
+            const shapeType = view.getInt32(32, true);
+            const rawBbox = {
+                xmin: view.getFloat64(36, true),
+                ymin: view.getFloat64(44, true),
+                xmax: view.getFloat64(52, true),
+                ymax: view.getFloat64(60, true)
+            };
+
+            // Auto-détection de la projection
+            let sourceProj = "EPSG:2154"; // Par défaut Lambert 93
+            if (rawBbox.ymax < 5000000 && rawBbox.ymax > 3000000) {
+                sourceProj = "EPSG:3945"; // CC45 Bordeaux
+            }
+
+            // Conversion du bbox global
+            const convertedMin = convertCoords(rawBbox.xmin, rawBbox.ymin, sourceProj);
+            const convertedMax = convertCoords(rawBbox.xmax, rawBbox.ymax, sourceProj);
+            
+            const bbox = {
+                xmin: convertedMin[1],
+                ymin: convertedMin[0],
+                xmax: convertedMax[1],
+                ymax: convertedMax[0]
+            };
+
+            let offset = 100;
+            const geometries = [];
+
+            while (offset < arrayBuffer.byteLength) {
+                if (offset + 8 > arrayBuffer.byteLength) break;
+                const recordNumber = view.getInt32(offset, false);
+                const contentLength = view.getInt32(offset + 4, false) * 2;
+                const recordStart = offset + 8;
+
+                if (recordStart + contentLength > arrayBuffer.byteLength) break;
+
+                const type = view.getInt32(recordStart, true);
+                
+                // Polygone (Type 5) ou Polyline (Type 3)
+                if (type === 5 || type === 3) {
+                    const numParts = view.getInt32(recordStart + 36, true);
+                    const numPoints = view.getInt32(recordStart + 40, true);
+
+                    const parts = [];
+                    for (let i = 0; i < numParts; i++) {
+                        parts.push(view.getInt32(recordStart + 44 + (i * 4), true));
+                    }
+
+                    const pointsStart = recordStart + 44 + (numParts * 4);
+                    const polygonParts = [];
+
+                    for (let i = 0; i < numParts; i++) {
+                        const start = parts[i];
+                        const end = (i === numParts - 1) ? numPoints : parts[i + 1];
+                        const partCoordinates = [];
+
+                        for (let j = start; j < end; j++) {
+                            const ptOffset = pointsStart + (j * 16);
+                            const x = view.getFloat64(ptOffset, true);
+                            const y = view.getFloat64(ptOffset + 8, true);
+
+                            // Convertir les coordonnées métriques en WGS84
+                            const latLng = convertCoords(x, y, sourceProj);
+                            partCoordinates.push(latLng);
+                        }
+                        polygonParts.push(partCoordinates);
+                    }
+
+                    geometries.push({
+                        recordIndex: recordNumber - 1, // 0-indexed
+                        type: type === 5 ? "Polygon" : "Polyline",
+                        coordinates: polygonParts
+                    });
+                }
+                offset = recordStart + contentLength;
+            }
+
+            return { bbox, geometries };
+        }
+
+        function convertCoords(x, y, sourceProj) {
+            // Convertir avec Proj4 de Lambert métrique à WGS84 [lng, lat]
+            const [lng, lat] = proj4(sourceProj, "EPSG:4326", [x, y]);
+            return [lat, lng]; // Leaflet requiert [lat, lng]
+        }
+
+        // Associer les formes du SHP aux zones du CSV par ordre d'index
+        function linkGeometries(shapeResult) {
+            const shapes = shapeResult.geometries;
+            
+            // On associe les shapes aux zones dans l'ordre de leur index
+            for (let i = 0; i < zones.length; i++) {
+                if (shapes[i]) {
+                    zones[i].geometry = {
+                        type: "MultiPolygon",
+                        coordinates: shapes[i].type === "Polygon" ? [shapes[i].coordinates] : shapes[i].coordinates
+                    };
+                    // Calcul du centroïde simple
+                    let sumLat = 0, sumLng = 0, count = 0;
+                    shapes[i].coordinates.forEach(ring => {
+                        ring.forEach(pt => {
+                            sumLat += pt[0];
+                            sumLng += pt[1];
+                            count++;
+                        });
+                    });
+                    if (count > 0) {
+                        zones[i].centroid = [sumLat / count, sumLng / count];
+                    }
+                }
+            }
+        }
+
+        // Parser pour le fichier ATT (Origine-Destination de Visum)
+        function parseODMatrix(text) {
+            odMatrix = [];
+            const lines = text.split(/\r?\n/);
+
+            for (let line of lines) {
+                line = line.trim();
+                // Ignorer les commentaires et définitions d'en-tête
+                if (!line || line.startsWith('*') || line.startsWith('$')) continue;
+
+                const cols = line.split(';');
+                if (cols.length >= 11) {
+                    const numO = parseInt(cols[0]);
+                    const numD = parseInt(cols[1]);
+
+                    // Lecture de la ligne avec conversion des décimales françaises (ex: 1,50 -> 1.5)
+                    const walk = parseFloat(cols[2].replace(',', '.')) || 0;
+                    const carPass = parseFloat(cols[5].replace(',', '.')) || 0;
+                    const tc = parseFloat(cols[6].replace(',', '.')) || 0;
+                    const carDrive = parseFloat(cols[7].replace(',', '.')) || 0;
+                    const velo = parseFloat(cols[8].replace(',', '.')) || 0;
+                    const pr = parseFloat(cols[9].replace(',', '.')) || 0;
+                    const cov = parseFloat(cols[10].replace(',', '.')) || 0;
+
+                    // Formule globale demandée par l'utilisateur
+                    const total = walk + carPass + tc + carDrive + velo + pr + cov;
+
+                    if (total > 0 && !isNaN(numO) && !isNaN(numD)) {
+                        odMatrix.push({
+                            from: numO,
+                            to: numD,
+                            walk,
+                            carPass,
+                            tc,
+                            carDrive,
+                            velo,
+                            pr,
+                            cov,
+                            total
+                        });
+                    }
+                }
+            }
+        }
+
+        // Aggrégation de la matrice au niveau des Zones et création des Communes
+        function aggregateData() {
+            communes = [];
+            communeMap = {};
+
+            // 1. Initialiser les compteurs sur chaque zone
+            zones.forEach(z => {
+                z.totalEmis = 0;
+                z.totalRecus = 0;
+                z.modes = { walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 };
+                z.outflows = [];
+                z.inflows = [];
+            });
+
+            // 2. Traiter la matrice OD et attribuer aux zones d'origine et de destination
+            odMatrix.forEach(flow => {
+                const zoneO = zoneMap[flow.from];
+                const zoneD = zoneMap[flow.to];
+
+                if (zoneO) {
+                    zoneO.totalEmis += flow.total;
+                    zoneO.modes.walk += flow.walk;
+                    zoneO.modes.carPass += flow.carPass;
+                    zoneO.modes.tc += flow.tc;
+                    zoneO.modes.carDrive += flow.carDrive;
+                    zoneO.modes.velo += flow.velo;
+                    zoneO.modes.pr += flow.pr;
+                    zoneO.modes.cov += flow.cov;
+                    zoneO.outflows.push(flow);
+                }
+
+                if (zoneD) {
+                    zoneD.totalRecus += flow.total;
+                    zoneD.inflows.push(flow);
+                }
+            });
+
+            // 3. Agrégation par COMMUNE
+            zones.forEach(zone => {
+                const comName = zone.commune;
+                if (!communeMap[comName]) {
+                    communeMap[comName] = {
+                        nom: comName,
+                        zones: [],
+                        pop: 0,
+                        emplois: 0,
+                        totalEmis: 0,
+                        totalRecus: 0,
+                        modes: { walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 },
+                        geometryList: [],
+                        centroid: null,
+                        outflows: {}, // Vers d'autres communes
+                        inflows: {}   // Depuis d'autres communes
+                    };
+                    communes.push(communeMap[comName]);
+                }
+
+                const com = communeMap[comName];
+                com.zones.push(zone);
+                com.pop += zone.pop;
+                com.emplois += zone.emplois;
+                com.totalEmis += zone.totalEmis;
+                com.totalRecus += zone.totalRecus;
+
+                // Ajouter les modes de transport cumulés
+                com.modes.walk += zone.modes.walk;
+                com.modes.carPass += zone.modes.carPass;
+                com.modes.tc += zone.modes.tc;
+                com.modes.carDrive += zone.modes.carDrive;
+                com.modes.velo += zone.modes.velo;
+                com.modes.pr += zone.modes.pr;
+                com.modes.cov += zone.modes.cov;
+
+                if (zone.geometry) {
+                    com.geometryList.push(zone.geometry);
+                }
+            });
+
+            // Calcul du centroïde moyen de chaque commune
+            communes.forEach(com => {
+                let sumLat = 0, sumLng = 0, count = 0;
+                com.zones.forEach(z => {
+                    if (z.centroid) {
+                        sumLat += z.centroid[0];
+                        sumLng += z.centroid[1];
+                        count++;
+                    }
+                });
+                if (count > 0) {
+                    com.centroid = [sumLat / count, sumLng / count];
+                }
+            });
+
+            // Agrégation des flux OD à l'échelle communale
+            odMatrix.forEach(flow => {
+                const zoneO = zoneMap[flow.from];
+                const zoneD = zoneMap[flow.to];
+
+                if (zoneO && zoneD) {
+                    const comO = zoneO.commune;
+                    const comD = zoneD.commune;
+
+                    if (!communeMap[comO].outflows[comD]) {
+                        communeMap[comO].outflows[comD] = { from: comO, to: comD, total: 0, walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 };
+                    }
+                    if (!communeMap[comD].inflows[comO]) {
+                        communeMap[comD].inflows[comO] = { from: comO, to: comD, total: 0, walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 };
+                    }
+
+                    const outObj = communeMap[comO].outflows[comD];
+                    const inObj = communeMap[comD].inflows[comO];
+
+                    [outObj, inObj].forEach(obj => {
+                        obj.total += flow.total;
+                        obj.walk += flow.walk;
+                        obj.carPass += flow.carPass;
+                        obj.tc += flow.tc;
+                        obj.carDrive += flow.carDrive;
+                        obj.velo += flow.velo;
+                        obj.pr += flow.pr;
+                        obj.cov += flow.cov;
+                    });
+                }
+            });
+        }
+
+        // ----------------- CARTOGRAPHIE INITIALISATION -----------------
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: false
+            }).setView([44.8378, -0.5792], 11);
+
+            L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+            // Fond de carte sombre minimaliste pour faire ressortir les flux
+            baseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 20
+            }).addTo(map);
+
+            choroplethLayer = L.layerGroup().addTo(map);
+            odFlowsLayer = L.layerGroup().addTo(map);
+            activeSelectionLayer = L.layerGroup().addTo(map);
+        }
+
+        // Définir l'échelle active (Zone ou Commune)
+        function setScale(scale) {
+            currentScale = scale;
+            activeODTerritory = null; // Réinitialise l'OD
+            document.getElementById('od-controls').classList.add('hidden');
+            document.getElementById('od-setup-tip').classList.remove('hidden');
+            document.getElementById('btn-clear-od').classList.add('hidden');
+
+            const btnZone = document.getElementById('btn-scale-zone');
+            const btnCommune = document.getElementById('btn-scale-commune');
+
+            if (scale === 'zone') {
+                btnZone.className = "py-1.5 text-xs font-medium rounded-md transition text-slate-700 bg-white shadow-sm";
+                btnCommune.className = "py-1.5 text-xs font-medium rounded-md transition text-slate-600 hover:text-slate-900";
+            } else {
+                btnCommune.className = "py-1.5 text-xs font-medium rounded-md transition text-slate-700 bg-white shadow-sm";
+                btnZone.className = "py-1.5 text-xs font-medium rounded-md transition text-slate-600 hover:text-slate-900";
+            }
+
+            updateChoropleth();
+            updateTerritoryList();
+            showGlobalStats();
+            odFlowsLayer.clearLayers();
+            activeSelectionLayer.clearLayers();
+        }
+
+        // ----------------- ANALYSE CHROMATIQUE & CHOROPLÈTHE -----------------
+        // Gammes de couleurs
+        const colorScales = {
+            pop: ['#edf8fb', '#b2e2e2', '#66c2a4', '#2ca25f', '#006d2c'],
+            emplois: ['#f2f0f7', '#d7b5d8', '#df65b0', '#dd1c77', '#980043'],
+            emis: ['#fef0d9', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000'],
+            recus: ['#f0f9e8', '#bae4bc', '#7bccc4', '#43a2ca', '#0868ac'],
+            pm_car: ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15'],
+            pm_tc: ['#e5f5e0', '#a1d99b', '#74c476', '#31a354', '#006d2c']
+        };
+
+        function getColor(value, scaleName, min, max) {
+            const colors = colorScales[scaleName] || ['#f1f5f9', '#cbd5e1', '#94a3b8', '#64748b', '#334155'];
+            if (max === min) return colors[0];
+            const ratio = (value - min) / (max - min);
+            const idx = Math.min(Math.floor(ratio * colors.length), colors.length - 1);
+            return colors[idx >= 0 ? idx : 0];
+        }
+
+        function getTerritoryValue(item, varName) {
+            const totModes = item.modes.walk + item.modes.carPass + item.modes.tc + item.modes.carDrive + item.modes.velo + item.modes.pr + item.modes.cov;
+            
+            switch (varName) {
+                case 'pop': return item.pop;
+                case 'emplois': return item.emplois;
+                case 'emis': return item.totalEmis;
+                case 'recus': return item.totalRecus;
+                case 'pm_car':
+                    const totalCar = item.modes.carPass + item.modes.carDrive + item.modes.cov;
+                    return totModes > 0 ? (totalCar / totModes) * 100 : 0;
+                case 'pm_tc':
+                    const totalTc = item.modes.tc + item.modes.pr;
+                    return totModes > 0 ? (totalTc / totModes) * 100 : 0;
+                default: return 0;
+            }
+        }
+
+        function updateChoropleth() {
+            choroplethLayer.clearLayers();
+            currentMapVariable = document.getElementById('map-variable').value;
+
+            const collection = currentScale === 'zone' ? zones : communes;
+
+            // Déterminer Min et Max de la variable sélectionnée
+            let min = Infinity, max = -Infinity;
+            collection.forEach(item => {
+                const val = getTerritoryValue(item, currentMapVariable);
+                if (val < min) min = val;
+                if (val > max) max = val;
+            });
+
+            if (min === Infinity) { min = 0; max = 100; }
+
+            // Dessiner chaque territoire
+            collection.forEach(item => {
+                if (currentScale === 'zone') {
+                    if (item.geometry) {
+                        drawPolygon(item.geometry, item, min, max);
+                    }
+                } else {
+                    // Commune (composée de multiples géométries de zones)
+                    item.geometryList.forEach(geom => {
+                        drawPolygon(geom, item, min, max);
+                    });
+                }
+            });
+
+            updateLegend(min, max);
+        }
+
+        function drawPolygon(geometry, item, min, max) {
+            const value = getTerritoryValue(item, currentMapVariable);
+            const fillColor = currentMapVariable === 'none' ? '#cbd5e1' : getColor(value, currentMapVariable, min, max);
+
+            // Formater l'info-bulle du survol
+            let tooltipText = `<b>${item.nom}</b><br/>`;
+            if (currentScale === 'zone') {
+                tooltipText += `<span class="text-xs text-slate-500">Commune: ${item.commune}</span><br/>`;
+            }
+            if (currentMapVariable !== 'none') {
+                let displayVal = formatNumber(Math.round(value));
+                if (currentMapVariable.startsWith('pm_')) displayVal += " %";
+                tooltipText += `<span class="font-semibold text-emerald-600">${getVarLabel(currentMapVariable)}: ${displayVal}</span>`;
+            }
+
+            const polygon = L.geoJSON(geometry, {
+                style: {
+                    fillColor: fillColor,
+                    fillOpacity: 0.75,
+                    color: '#64748b',
+                    weight: currentScale === 'zone' ? 0.8 : 1.5,
+                    opacity: 0.9
+                }
+            })
+            .bindTooltip(tooltipText, { sticky: true, className: 'rounded border border-slate-200 shadow-md font-sans text-xs bg-white text-slate-800' })
+            .on('mouseover', function (e) {
+                const layer = e.target;
+                layer.setStyle({
+                    fillOpacity: 0.9,
+                    weight: 2.5,
+                    color: '#0f172a'
+                });
+            })
+            .on('mouseout', function (e) {
+                const layer = e.target;
+                polygon.resetStyle(layer);
+            })
+            .on('click', function () {
+                selectTerritory(item);
+            });
+
+            choroplethLayer.addLayer(polygon);
+        }
+
+        function getVarLabel(variable) {
+            switch (variable) {
+                case 'pop': return 'Population';
+                case 'emplois': return 'Emplois';
+                case 'emis': return 'Flux émis';
+                case 'recus': return 'Flux reçus';
+                case 'pm_car': return 'Part Voiture';
+                case 'pm_tc': return 'Part Transports en Commun';
+                default: return '';
+            }
+        }
+
+        // Légende Cartographique
+        function updateLegend(min, max) {
+            const legendTitle = document.getElementById('legend-title');
+            const legendColors = document.getElementById('legend-colors');
+            
+            if (currentMapVariable === 'none') {
+                document.getElementById('legend').classList.add('hidden');
+                return;
+            }
+            document.getElementById('legend').classList.remove('hidden');
+
+            legendTitle.innerText = getVarLabel(currentMapVariable);
+            legendColors.innerHTML = "";
+
+            const colors = colorScales[currentMapVariable];
+            const steps = colors.length;
+
+            for (let i = 0; i < steps; i++) {
+                const stepValueMin = min + (i / steps) * (max - min);
+                const stepValueMax = min + ((i + 1) / steps) * (max - min);
+
+                let label = "";
+                if (currentMapVariable.startsWith('pm_')) {
+                    label = `${Math.round(stepValueMin)}% à ${Math.round(stepValueMax)}%`;
+                } else {
+                    label = `${formatNumber(Math.round(stepValueMin))} - ${formatNumber(Math.round(stepValueMax))}`;
+                }
+
+                const legendItem = document.createElement('div');
+                legendItem.className = "flex items-center gap-2";
+                legendItem.innerHTML = `
+                    <span class="inline-block w-4 h-4 rounded" style="background-color: ${colors[i]}"></span>
+                    <span class="text-slate-600 text-[11px]">${label}</span>
+                `;
+                legendColors.appendChild(legendItem);
+            }
+        }
+
+        // ----------------- ANALYSE ET SÉLECTION D'UN TERRITOIRE -----------------
+        function selectTerritory(item) {
+            activeODTerritory = item;
+
+            // Activer la visibilité des contrôles de flux
+            document.getElementById('od-setup-tip').classList.add('hidden');
+            document.getElementById('od-controls').classList.remove('hidden');
+            document.getElementById('btn-clear-od').classList.remove('hidden');
+
+            // Mettre en valeur visuellement le territoire sélectionné sur la carte
+            activeSelectionLayer.clearLayers();
+            if (item.centroid) {
+                const marker = L.circleMarker(item.centroid, {
+                    radius: 8,
+                    fillColor: '#f59e0b',
+                    color: '#ffffff',
+                    weight: 2,
+                    fillOpacity: 1,
+                    zIndexOffset: 1000
+                }).addTo(activeSelectionLayer);
+            }
+
+            // Mettre à jour la fiche statistique (Sidebar droite)
+            updateStatsSidebar(item);
+
+            // Tracer les flux
+            drawODFlows();
+        }
+
+        function setFlowDirection(dir) {
+            activeODDirection = dir;
+            const btnOut = document.getElementById('flow-dir-out');
+            const btnIn = document.getElementById('flow-dir-in');
+
+            if (dir === 'out') {
+                btnOut.className = "py-1 text-[11px] font-medium rounded transition text-slate-700 bg-white shadow-sm";
+                btnIn.className = "py-1 text-[11px] font-medium rounded transition text-slate-600";
+                document.getElementById('top-exchanges-direction').innerText = "Vers destinations";
+            } else {
+                btnIn.className = "py-1 text-[11px] font-medium rounded transition text-slate-700 bg-white shadow-sm";
+                btnOut.className = "py-1 text-[11px] font-medium rounded transition text-slate-600";
+                document.getElementById('top-exchanges-direction').innerText = "Depuis origines";
+            }
+
+            if (activeODTerritory) {
+                drawODFlows();
+                updateTopExchangesTable(activeODTerritory);
+            }
+        }
+
+        function updateODFilter(val) {
+            fluxThreshold = parseInt(val);
+            document.getElementById('flux-threshold-val').innerText = `${fluxThreshold} dépl.`;
+            if (activeODTerritory) {
+                drawODFlows();
+            }
+        }
+
+        function clearActiveOD() {
+            activeODTerritory = null;
+            odFlowsLayer.clearLayers();
+            activeSelectionLayer.clearLayers();
+            document.getElementById('od-controls').classList.add('hidden');
+            document.getElementById('od-setup-tip').classList.remove('hidden');
+            document.getElementById('btn-clear-od').classList.add('hidden');
+            showGlobalStats();
+        }
+
+        // ----------------- TRACÉ DES FLUX ORIGINE-DESTINATION (OD) -----------------
+        function drawODFlows() {
+            odFlowsLayer.clearLayers();
+            if (!activeODTerritory) return;
+
+            let flows = [];
+            const isZone = currentScale === 'zone';
+
+            if (isZone) {
+                // Échelle Zones
+                if (activeODDirection === 'out') {
+                    flows = activeODTerritory.outflows;
+                } else {
+                    flows = activeODTerritory.inflows;
+                }
+            } else {
+                // Échelle Communes
+                const rawFlows = activeODDirection === 'out' ? activeODTerritory.outflows : activeODTerritory.inflows;
+                flows = Object.values(rawFlows);
+            }
+
+            // Filtrer par le seuil défini
+            const filteredFlows = flows.filter(f => f.total >= fluxThreshold && f.from !== f.to);
+            document.getElementById('od-displayed-count').innerText = filteredFlows.length;
+
+            // Déterminer le flux max pour adapter l'épaisseur
+            let maxTotal = 0;
+            filteredFlows.forEach(f => { if (f.total > maxTotal) maxTotal = f.total; });
+
+            filteredFlows.forEach(flow => {
+                let startCentroid, endCentroid, labelO, labelD;
+
+                if (isZone) {
+                    const zoneO = zoneMap[flow.from];
+                    const zoneD = zoneMap[flow.to];
+                    if (zoneO && zoneD && zoneO.centroid && zoneD.centroid) {
+                        startCentroid = zoneO.centroid;
+                        endCentroid = zoneD.centroid;
+                        labelO = zoneO.nom;
+                        labelD = zoneD.nom;
+                    }
+                } else {
+                    const comO = communeMap[flow.from];
+                    const comD = communeMap[flow.to];
+                    if (comO && comD && comO.centroid && comD.centroid) {
+                        startCentroid = comO.centroid;
+                        endCentroid = comD.centroid;
+                        labelO = comO.nom;
+                        labelD = comD.nom;
+                    }
+                }
+
+                if (startCentroid && endCentroid) {
+                    // Calcul de l'épaisseur proportionnelle (max 7px, min 1px)
+                    const weight = maxTotal > 0 ? 1 + (flow.total / maxTotal) * 6 : 2;
+
+                    // Couleur thématique selon le mode dominant du flux
+                    let strokeColor = '#64748b'; // Défaut
+                    const tcTotal = flow.tc + flow.pr;
+                    const carTotal = flow.carDrive + flow.carPass + flow.cov;
+                    const activeTotal = flow.walk + flow.velo;
+
+                    if (carTotal > tcTotal && carTotal > activeTotal) {
+                        strokeColor = '#f59e0b'; // Jaune/Orange pour la Voiture
+                    } else if (tcTotal > carTotal && tcTotal > activeTotal) {
+                        strokeColor = '#10b981'; // Vert pour les Transports Publics
+                    } else if (activeTotal > carTotal && activeTotal > tcTotal) {
+                        strokeColor = '#ec4899'; // Rose pour les Modes Doux (Marche, vélo)
+                    }
+
+                    // Tracé de la ligne avec flèche directionnelle
+                    const polyline = L.polyline([startCentroid, endCentroid], {
+                        color: strokeColor,
+                        weight: weight,
+                        opacity: 0.7,
+                        dashArray: activeODDirection === 'in' ? '5, 5' : null
+                    });
+
+                    // Infobulle de flux
+                    const txt = `
+                        <div class="font-sans text-xs space-y-1.5 p-1 bg-white text-slate-800">
+                            <div class="font-bold border-b pb-1 text-[11px]">${labelO} <i data-lucide="arrow-right" class="inline-block w-3 h-3 mx-0.5"></i> ${labelD}</div>
+                            <div>Déplacements totaux : <b class="text-emerald-600">${Math.round(flow.total)}</b></div>
+                            <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
+                                <span>• Voiture (con. + pas.) :</span> <span>${Math.round(flow.carDrive + flow.carPass + flow.cov)}</span>
+                                <span>• Transports en commun :</span> <span>${Math.round(flow.tc + flow.pr)}</span>
+                                <span>• Vélo / Marche :</span> <span>${Math.round(flow.velo + flow.walk)}</span>
+                            </div>
+                        </div>
+                    `;
+
+                    polyline.bindTooltip(txt, { sticky: true, className: 'rounded border border-slate-200 shadow-md bg-white' });
+                    odFlowsLayer.addLayer(polyline);
+                }
+            });
+        }
+
+        // ----------------- TABLEAUX DE BORD STATISTIQUES (SIDEBAR DROITE) -----------------
+        function initEmptyChart() {
+            const ctx = document.getElementById('modalChart').getContext('2d');
+            modalChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Voiture', 'Transports en Commun', 'Marche à Pied', 'Vélo'],
+                    datasets: [{
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#f59e0b', '#10b981', '#3b82f6', '#ec4899'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false // Légende gérée à la main en HTML pour une interface épurée
+                        }
+                    },
+                    cutout: '70%'
+                }
+            });
+        }
+
+        // Statistiques globales de la Métropole complète
+        function showGlobalStats() {
+            document.getElementById('selected-name').innerText = "Métropole Complète";
+            document.getElementById('selected-sub').innerHTML = `<i data-lucide="globe" class="w-3.5 h-3.5"></i> Analyse globale agrégée`;
+            document.getElementById('selected-type-badge').innerText = currentScale === 'zone' ? "843 Zones" : "Communes";
+
+            // Cumuler les données de toutes les zones
+            let totalPop = 0, totalEmplois = 0, totalEmis = 0, totalRecus = 0;
+            const modes = { walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 };
+
+            zones.forEach(z => {
+                totalPop += z.pop;
+                totalEmplois += z.emplois;
+                totalEmis += z.totalEmis;
+                totalRecus += z.totalRecus;
+
+                for (let k in modes) {
+                    modes[k] += z.modes[k];
+                }
+            });
+
+            // Affichage des chiffres clés
+            document.getElementById('stat-pop').innerText = formatNumber(totalPop);
+            document.getElementById('stat-emplois').innerText = formatNumber(totalEmplois);
+            document.getElementById('stat-total-emis').innerText = formatNumber(Math.round(totalEmis));
+            document.getElementById('stat-total-recus').innerText = formatNumber(Math.round(totalRecus));
+
+            updateChart(modes);
+            updateTopExchangesTable(null);
+        }
+
+        function updateStatsSidebar(item) {
+            document.getElementById('selected-name').innerText = item.nom;
+            document.getElementById('selected-type-badge').innerText = currentScale === 'zone' ? `Zone ${item.num}` : "Commune";
+            
+            if (currentScale === 'zone') {
+                document.getElementById('selected-sub').innerHTML = `<i data-lucide="map-pin" class="w-3.5 h-3.5"></i> Commune de raccordement : ${item.commune}`;
+            } else {
+                document.getElementById('selected-sub').innerHTML = `<i data-lucide="layers" class="w-3.5 h-3.5"></i> Agglomération de ${item.zones.length} zones de trafic`;
+            }
+
+            document.getElementById('stat-pop').innerText = formatNumber(item.pop);
+            document.getElementById('stat-emplois').innerText = formatNumber(item.emplois);
+            document.getElementById('stat-total-emis').innerText = formatNumber(Math.round(item.totalEmis));
+            document.getElementById('stat-total-recus').innerText = formatNumber(Math.round(item.totalRecus));
+
+            updateChart(item.modes);
+            updateTopExchangesTable(item);
+        }
+
+        // Mettre à jour le graphique dynamique
+        function updateChart(modes) {
+            const voiture = modes.carDrive + modes.carPass + modes.cov;
+            const tc = modes.tc + modes.pr;
+            const walk = modes.walk;
+            const velo = modes.velo;
+
+            const total = voiture + tc + walk + velo;
+
+            if (total > 0) {
+                const pctVoiture = ((voiture / total) * 100).toFixed(1);
+                const pctTC = ((tc / total) * 100).toFixed(1);
+                
+                document.getElementById('pm-val-voiture').innerText = `${pctVoiture} %`;
+                document.getElementById('pm-val-tc').innerText = `${pctTC} %`;
+
+                modalChartInstance.data.datasets[0].data = [voiture, tc, walk, velo];
+                modalChartInstance.update();
+            } else {
+                document.getElementById('pm-val-voiture').innerText = "0.0 %";
+                document.getElementById('pm-val-tc').innerText = "0.0 %";
+                modalChartInstance.data.datasets[0].data = [0, 0, 0, 0];
+                modalChartInstance.update();
+            }
+        }
+
+        // Mettre à jour le tableau des liaisons majeures
+        function updateTopExchangesTable(item) {
+            const tbody = document.getElementById('top-od-tbody');
+            tbody.innerHTML = "";
+
+            let exchanges = [];
+
+            if (!item) {
+                // Métropole globale - lister les flux les plus massifs existants
+                if (currentScale === 'zone') {
+                    exchanges = [...odMatrix];
+                } else {
+                    // Agrégation communale globale
+                    communes.forEach(c => {
+                        Object.values(c.outflows).forEach(flow => {
+                            exchanges.push(flow);
+                        });
+                    });
+                }
+            } else {
+                // Territoire individuel sélectionné
+                if (currentScale === 'zone') {
+                    exchanges = activeODDirection === 'out' ? [...item.outflows] : [...item.inflows];
+                } else {
+                    const rawFlows = activeODDirection === 'out' ? item.outflows : item.inflows;
+                    exchanges = Object.values(rawFlows);
+                }
+            }
+
+            // Exclure les trajets intra-zone / intra-commune pour plus de sens analytique
+            exchanges = exchanges.filter(e => e.from !== e.to);
+
+            // Trier par volume décroissant
+            exchanges.sort((a, b) => b.total - a.total);
+
+            // Prendre le top 5
+            const top5 = exchanges.slice(0, 5);
+
+            if (top5.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-3 py-4 text-center text-slate-400 italic">Aucun flux enregistré</td></tr>`;
+                return;
+            }
+
+            top5.forEach(e => {
+                let name = "";
+                if (currentScale === 'zone') {
+                    // On affiche la zone cible
+                    const targetNum = activeODDirection === 'out' ? e.to : e.from;
+                    const targetZone = zoneMap[targetNum];
+                    name = targetZone ? targetZone.nom : `Zone ${targetNum}`;
+                } else {
+                    const targetName = activeODDirection === 'out' ? e.to : e.from;
+                    name = targetName;
+                }
+
+                const totalCar = e.carDrive + e.carPass + e.cov;
+                const totalTc = e.tc + e.pr;
+                
+                const voiPct = e.total > 0 ? Math.round((totalCar / e.total) * 100) : 0;
+                const tcPct = e.total > 0 ? Math.round((totalTc / e.total) * 100) : 0;
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition cursor-pointer";
+                tr.onclick = () => {
+                    if (currentScale === 'zone') {
+                        const targetNum = activeODDirection === 'out' ? e.to : e.from;
+                        if (zoneMap[targetNum]) selectTerritory(zoneMap[targetNum]);
+                    } else {
+                        const targetName = activeODDirection === 'out' ? e.to : e.from;
+                        if (communeMap[targetName]) selectTerritory(communeMap[targetName]);
+                    }
+                };
+
+                tr.innerHTML = `
+                    <td class="px-3 py-2 font-medium text-slate-800 max-w-[140px] truncate" title="${name}">${name}</td>
+                    <td class="px-3 py-2 text-right font-semibold text-emerald-600">${Math.round(e.total)}</td>
+                    <td class="px-3 py-2 text-right text-amber-600 font-medium">${voiPct}%</td>
+                    <td class="px-3 py-2 text-right text-emerald-600 font-medium">${tcPct}%</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // ----------------- BARRE DE RECHERCHE & NAVIGATION LATÉRALE -----------------
+        function updateTerritoryList() {
+            const container = document.getElementById('territory-list');
+            container.innerHTML = "";
+
+            const collection = currentScale === 'zone' ? zones : communes;
+
+            collection.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = "flex justify-between items-center p-2 rounded-md hover:bg-slate-100 transition cursor-pointer text-xs border border-transparent";
+                itemDiv.id = `sidebar-item-${currentScale === 'zone' ? item.num : item.nom}`;
+                
+                // Mettre en gras et fond coloré si sélectionné
+                if (activeODTerritory && ((currentScale === 'zone' && activeODTerritory.num === item.num) || (currentScale === 'commune' && activeODTerritory.nom === item.nom))) {
+                    itemDiv.className += " bg-emerald-50 border-emerald-200 font-semibold text-emerald-800";
+                }
+
+                let subText = "";
+                if (currentScale === 'zone') {
+                    subText = `<span class="text-[10px] text-slate-400 block">${item.commune}</span>`;
+                } else {
+                    subText = `<span class="text-[10px] text-slate-400 block">${item.zones.length} zones</span>`;
+                }
+
+                itemDiv.innerHTML = `
+                    <div>
+                        <span class="block text-slate-700 font-medium">${item.nom}</span>
+                        ${subText}
+                    </div>
+                    <div class="text-right text-slate-500 font-semibold text-[10px]">
+                        ${formatNumber(item.pop)} hab.
+                    </div>
+                `;
+
+                itemDiv.onclick = () => {
+                    selectTerritory(item);
+                    
+                    // Centrer la carte sur son centroïde
+                    if (item.centroid) {
+                        map.setView(item.centroid, currentScale === 'zone' ? 13 : 12);
+                    }
+
+                    // Mettre à jour le surlignage dans la liste latérale
+                    updateTerritoryListHighlight();
+                };
+
+                container.appendChild(itemDiv);
+            });
+        }
+
+        function updateTerritoryListHighlight() {
+            const collection = currentScale === 'zone' ? zones : communes;
+            collection.forEach(item => {
+                const id = `sidebar-item-${currentScale === 'zone' ? item.num : item.nom}`;
+                const el = document.getElementById(id);
+                if (el) {
+                    if (activeODTerritory && ((currentScale === 'zone' && activeODTerritory.num === item.num) || (currentScale === 'commune' && activeODTerritory.nom === item.nom))) {
+                        el.className = "flex justify-between items-center p-2 rounded-md transition cursor-pointer text-xs border bg-emerald-50 border-emerald-200 font-semibold text-emerald-800";
+                    } else {
+                        el.className = "flex justify-between items-center p-2 rounded-md hover:bg-slate-100 transition cursor-pointer text-xs border border-transparent text-slate-600";
+                    }
+                }
+            });
+        }
+
+        // Filtre de la barre de recherche
+        function filterTerritories() {
+            const query = document.getElementById('search-input').value.toLowerCase().trim();
+            const collection = currentScale === 'zone' ? zones : communes;
+
+            collection.forEach(item => {
+                const id = `sidebar-item-${currentScale === 'zone' ? item.num : item.nom}`;
+                const el = document.getElementById(id);
+                if (el) {
+                    const matchName = item.nom.toLowerCase().includes(query);
+                    const matchCommune = currentScale === 'zone' ? item.commune.toLowerCase().includes(query) : false;
+
+                    if (matchName || matchCommune) {
+                        el.classList.remove('hidden');
+                    } else {
+                        el.classList.add('hidden');
+                    }
+                }
+            });
+        }
+
+        // Formateur d'écritures de nombres (séparateurs de milliers)
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+        }
+    </script>
+</body>
+</html>
