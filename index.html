@@ -9,8 +9,6 @@
     <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- Proj4js for Lambert 93/CC45 conversions -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Lucide Icons -->
@@ -37,7 +35,7 @@
 <body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
 
     <!-- ÉCRAN DE CHARGEMENT -->
-    <div id="loader-overlay" class="fixed inset-0 bg-slate-900/90 z-[9999] flex flex-col items-center justify-center text-white p-6 transition-opacity duration-500">
+    <div id="loader-overlay" class="fixed inset-0 bg-slate-900/95 z-[9999] flex flex-col items-center justify-center text-white p-6 transition-opacity duration-500">
         <div class="max-w-md w-full text-center space-y-6">
             <div class="flex justify-center">
                 <div class="relative w-20 h-20">
@@ -46,30 +44,34 @@
                 </div>
             </div>
             <h1 class="text-2xl font-bold tracking-tight">Plateforme d'Analyse Mobilité 2025</h1>
-            <p class="text-slate-400 text-sm">Chargement et traitement en direct des bases de données transports...</p>
+            <p class="text-slate-400 text-sm">Chargement en cours des bases de données du dépôt...</p>
             
             <div class="bg-slate-800 rounded-lg p-4 text-left font-mono text-xs space-y-2 text-emerald-400 border border-slate-700">
                 <div id="status-csv" class="flex justify-between items-center">
-                    <span>• Base ZONE_2025 (CSV)...</span>
+                    <span>• Base ZONE_2025.csv...</span>
                     <span class="text-amber-400 font-bold" id="badge-csv">Attente</span>
                 </div>
                 <div id="status-shp" class="flex justify-between items-center">
-                    <span>• Géométries Matin_2025 (SHP)...</span>
+                    <span>• Frontières zone.geojson...</span>
                     <span class="text-amber-400 font-bold" id="badge-shp">Attente</span>
                 </div>
                 <div id="status-att" class="flex justify-between items-center">
-                    <span>• Matrice OD_PM_2025 (ATT)...</span>
+                    <span>• Matrice OD_PM_2025_matin.att...</span>
                     <span class="text-amber-400 font-bold" id="badge-att">Attente</span>
                 </div>
             </div>
 
-            <!-- Fallback Zone d'importation si échec -->
-            <div id="fallback-upload" class="hidden space-y-4 bg-slate-800 p-4 rounded-lg border border-red-500/30 text-slate-300">
-                <p class="text-sm text-red-400 font-semibold">Certains fichiers locaux n'ont pas pu être chargés automatiquement dans cet environnement d'exécution. Veuillez les glisser-déposer ci-dessous :</p>
-                <div class="border-2 border-dashed border-slate-600 hover:border-emerald-500 rounded p-4 text-center cursor-pointer transition" onclick="document.getElementById('manual-files').click()">
-                    <span class="text-xs">Cliquez pour importer ZONE_2025.csv, Matin_2025_Shape_zone.shp ou OD_PM_2025_matin.att</span>
-                    <input type="file" id="manual-files" multiple class="hidden" onchange="handleManualFiles(event)">
-                </div>
+            <!-- Message d'aide en cas d'erreur de chargement de l'un des fichiers -->
+            <div id="error-help" class="hidden text-left bg-red-950/40 p-4 rounded-lg border border-red-500/30 text-slate-300 text-xs space-y-2">
+                <p class="text-red-400 font-semibold flex items-center gap-1.5">
+                    <i data-lucide="alert-circle" class="w-4 h-4"></i> Échec du chargement automatique
+                </p>
+                <p>Assurez-vous que les fichiers suivants sont situés dans le même dossier que ce fichier HTML :</p>
+                <ul class="list-disc pl-5 space-y-1 text-slate-400 font-mono">
+                    <li>ZONE_2025.csv</li>
+                    <li>zone.geojson</li>
+                    <li>OD_PM_2025_matin.att</li>
+                </ul>
             </div>
         </div>
     </div>
@@ -101,9 +103,8 @@
     <!-- ZONE PRINCIPALE (CARTE + SIDEBARS) -->
     <main class="flex-1 flex overflow-hidden relative">
 
-        <!-- SIDEBAR GAUCHE : PARAMÈTRES ET SÉLECTION -->
+        <!-- SIDEBAR GAUCHE : PARAMÈTRES ET RECHERCHE -->
         <aside class="w-80 bg-white border-r border-slate-200 flex flex-col overflow-hidden shrink-0 z-10 shadow-sm">
-            <!-- Onglets de Configuration -->
             <div class="p-4 border-b border-slate-100 space-y-4">
                 <div>
                     <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">Échelle d'analyse</label>
@@ -127,11 +128,13 @@
                         <option value="recus">Flux reçus (Arrivée)</option>
                         <option value="pm_car">Part Modale Voiture (%)</option>
                         <option value="pm_tc">Part Modale Transports en Commun (%)</option>
+                        <option value="pm_marche">Part Modale Marche à pied (%)</option>
+                        <option value="pm_velo">Part Modale Vélo (%)</option>
                     </select>
                 </div>
             </div>
 
-            <!-- Filtres & Liste des Communes -->
+            <!-- Filtres & Liste dynamique -->
             <div class="flex-1 flex flex-col overflow-hidden">
                 <div class="p-4 border-b border-slate-100 bg-slate-50/50">
                     <div class="relative">
@@ -146,10 +149,10 @@
                 </div>
             </div>
 
-            <!-- Pied de page Sidebar Ggauche -->
+            <!-- Pied de page Sidebar gauche -->
             <div class="p-4 bg-slate-50 border-t border-slate-200 text-[10px] text-slate-400 space-y-1">
-                <div>Source données : ZONE_2025 & OD_PM_2025</div>
-                <div>Projection : EPSG:2154 (Lambert-93) ou EPSG:3945</div>
+                <div>Fichiers sources locaux chargés avec succès.</div>
+                <div>Projection géographique par défaut : WGS84</div>
             </div>
         </aside>
 
@@ -216,7 +219,7 @@
 
             <!-- Contenu Statistique -->
             <div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
-                <!-- Titre d'entité sélectionné -->
+                <!-- Titre de l'entité sélectionnée -->
                 <div class="space-y-1 pb-4 border-b border-slate-100">
                     <h2 id="selected-name" class="text-xl font-extrabold text-slate-800 leading-tight">Territoire Global</h2>
                     <p id="selected-sub" class="text-xs text-slate-500 flex items-center gap-1">
@@ -235,40 +238,61 @@
                         <div id="stat-emplois" class="text-lg font-extrabold text-slate-800">-</div>
                     </div>
                     <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-100">
-                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Émis (matin)</span>
+                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Émis</span>
                         <div id="stat-total-emis" class="text-lg font-extrabold text-emerald-600">-</div>
                     </div>
                     <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-100">
-                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Reçus (matin)</span>
+                        <span class="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Reçus</span>
                         <div id="stat-total-recus" class="text-lg font-extrabold text-sky-600">-</div>
                     </div>
                 </div>
 
-                <!-- GRAPHIQUE DES PARTS MODALES -->
-                <div class="space-y-2.5">
+                <!-- GRAPHIQUE DES PARTS MODALES COMPLÈTES (4 MODES) -->
+                <div class="space-y-3">
                     <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                        <i data-lucide="pie-chart" class="w-4 h-4 text-slate-400"></i> Répartition des Modes de Transport
+                        <i data-lucide="pie-chart" class="w-4 h-4 text-slate-400"></i> Parts Modales de Transport (Matin)
                     </h3>
                     <div class="relative h-48 w-full bg-slate-50 rounded-lg p-2 flex items-center justify-center border border-slate-100">
                         <canvas id="modalChart"></canvas>
                     </div>
-                    <!-- Légende personnalisée détaillée -->
-                    <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <div class="space-y-1">
-                            <span class="font-bold text-slate-700 block text-[10px] uppercase">Part Voiture</span>
+                    
+                    <!-- Légende personnalisée détaillée à 4 modes -->
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <!-- Voiture -->
+                        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-1">
+                            <span class="font-bold text-slate-600 block text-[10px] uppercase">Voiture</span>
                             <div class="flex items-center gap-1.5">
                                 <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
                                 <span id="pm-val-voiture" class="font-bold text-slate-800">- %</span>
                             </div>
-                            <span class="text-[10px] text-slate-400 block">(Conducteur + Passager + Covoiturage)</span>
+                            <span class="text-[10px] text-slate-400 block leading-tight">(Cond. + Pass. + Cov.)</span>
                         </div>
-                        <div class="space-y-1">
-                            <span class="font-bold text-slate-700 block text-[10px] uppercase">Part TC</span>
+                        <!-- Transports publics -->
+                        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-1">
+                            <span class="font-bold text-slate-600 block text-[10px] uppercase">Transports C.</span>
                             <div class="flex items-center gap-1.5">
                                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                                 <span id="pm-val-tc" class="font-bold text-slate-800">- %</span>
                             </div>
-                            <span class="text-[10px] text-slate-400 block">(Transports publics + P+R)</span>
+                            <span class="text-[10px] text-slate-400 block leading-tight">(Métro, Bus + P+R)</span>
+                        </div>
+                        <!-- Marche -->
+                        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-1">
+                            <span class="font-bold text-slate-600 block text-[10px] uppercase">Marche</span>
+                            <div class="flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
+                                <span id="pm-val-marche" class="font-bold text-slate-800">- %</span>
+                            </div>
+                            <span class="text-[10px] text-slate-400 block leading-tight">(Déplacements MaP)</span>
+                        </div>
+                        <!-- Vélo -->
+                        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-1">
+                            <span class="font-bold text-slate-600 block text-[10px] uppercase">Vélo</span>
+                            <div class="flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-fuchsia-500"></span>
+                                <span id="pm-val-velo" class="font-bold text-slate-800">- %</span>
+                            </div>
+                            <span class="text-[10px] text-slate-400 block leading-tight">(Cyclistes actifs)</span>
                         </div>
                     </div>
                 </div>
@@ -287,6 +311,7 @@
                                     <th class="px-3 py-2 text-right">Volume</th>
                                     <th class="px-3 py-2 text-right">Voi %</th>
                                     <th class="px-3 py-2 text-right">TC %</th>
+                                    <th class="px-3 py-2 text-right">Vel %</th>
                                 </tr>
                             </thead>
                             <tbody id="top-od-tbody" class="divide-y divide-slate-100 text-slate-700">
@@ -299,26 +324,26 @@
         </aside>
     </main>
 
-    <!-- MODULE DE GESTION DU CODE, PARSERS ET CONVERSIONS -->
+    <!-- MODULE DE GESTION DES FLUX, PARSERS ET CONVERSIONS -->
     <script>
-        // Initialisation de Lucide Icons
+        // Initialisation des icônes Lucide
         lucide.createIcons();
 
-        // variables Globales de données
+        // Variables globales de données
         let rawCsvData = "";
-        let rawShpData = null;
+        let rawGeoJsonData = null;
         let rawAttData = "";
 
         let zones = [];       // Liste complète des objets zones
-        let zoneMap = {};     // Map {num: zone} pour accès immédiat
+        let zoneMap = {};     // Index {num: zone} pour accès immédiat
         let communes = [];    // Liste agrégée des communes
-        let communeMap = {};  // Map {nom_commune: commune}
-        let odMatrix = [];    // Tableau des lignes OD parsées de l'ATT
+        let communeMap = {};  // Index {nom_commune: commune}
+        let odMatrix = [];    // Tableau des relations OD lues du fichier .att
 
         // Paramètres de l'application
         let currentScale = 'zone'; // 'zone' ou 'commune'
         let currentMapVariable = 'pop';
-        let activeODTerritory = null; // ID de la zone/commune sélectionnée pour afficher l'OD
+        let activeODTerritory = null; // Territoire sélectionné pour les flux
         let activeODDirection = 'out'; // 'out' (émis) ou 'in' (reçus)
         let fluxThreshold = 10;
 
@@ -332,70 +357,42 @@
         // Graphique ChartJS
         let modalChartInstance = null;
 
-        // Définir les projections Lambert-93 (EPSG:2154) et Lambert CC45 (EPSG:3945)
-        proj4.defs("EPSG:2154", "+proj=lcc +lat_1=44 +lat_2=49 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
-        proj4.defs("EPSG:3945", "+proj=lcc +lat_1=44.25 +lat_2=45.75 +lat_0=45 +lon_0=3 +x_0=1700000 +y_0=4200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
-
-        // ----------------- DÉMARRAGE ET CHARGEMENT AUTOMATIQUE DES FICHIERS -----------------
+        // ----------------- CHARGEMENT DIRECT DES RESSOURCES -----------------
         window.addEventListener('load', async () => {
             initMap();
             initEmptyChart();
 
             try {
-                // Étape 1 : Charger ZONE_2025.xlsx - Zones.csv
+                // Étape 1 : Charger ZONE_2025.csv
                 updateLoaderStatus('csv', 'Chargement...', 'amber');
-                const responseCsv = await fetch('ZONE_2025.xlsx - Zones.csv');
-                if (!responseCsv.ok) throw new Error('Impossible de charger le fichier ZONE_2025');
+                const responseCsv = await fetch('ZONE_2025.csv');
+                if (!responseCsv.ok) throw new Error('Impossible de charger ZONE_2025.csv');
                 rawCsvData = await responseCsv.text();
                 updateLoaderStatus('csv', 'Succès', 'emerald');
 
-                // Étape 2 : Charger Matin_2025_Shape_zone.shp
+                // Étape 2 : Charger zone.geojson
                 updateLoaderStatus('shp', 'Chargement...', 'amber');
-                const responseShp = await fetch('Matin_2025_Shape_zone.shp');
-                if (!responseShp.ok) throw new Error('Impossible de charger le fichier SHP');
-                rawShpData = await responseShp.arrayBuffer();
+                const responseGeo = await fetch('zone.geojson');
+                if (!responseGeo.ok) throw new Error('Impossible de charger zone.geojson');
+                rawGeoJsonData = await responseGeo.json();
                 updateLoaderStatus('shp', 'Succès', 'emerald');
 
                 // Étape 3 : Charger OD_PM_2025_matin.att
                 updateLoaderStatus('att', 'Chargement...', 'amber');
                 const responseAtt = await fetch('OD_PM_2025_matin.att');
-                if (!responseAtt.ok) throw new Error('Impossible de charger le fichier ATT');
+                if (!responseAtt.ok) throw new Error('Impossible de charger OD_PM_2025_matin.att');
                 rawAttData = await responseAtt.text();
                 updateLoaderStatus('att', 'Succès', 'emerald');
 
-                // Lancement du traitement
+                // Démarrer la chaîne de compilation
                 processData();
 
             } catch (err) {
-                console.warn("Échec du chargement direct. Activation du chargement manuel.", err);
-                document.getElementById('fallback-upload').classList.remove('hidden');
-                document.querySelector('#loader-overlay p').innerHTML = "<span class='text-red-400 font-bold'>Attention : Fichiers manquants dans l'espace de travail.</span><br/>Veuillez charger manuellement les 3 fichiers ci-dessous.";
+                console.error("Échec du chargement des fichiers.", err);
+                document.getElementById('error-help').classList.remove('hidden');
+                document.querySelector('#loader-overlay p').innerHTML = "<span class='text-red-400 font-bold'>Attention : Fichiers manquants ou inaccessibles.</span>";
             }
         });
-
-        // Fonction pour gérer les importations manuelles par Drag & Drop ou sélecteur
-        async function handleManualFiles(event) {
-            const files = event.target.files;
-            for (let file of files) {
-                const name = file.name;
-                if (name.endsWith('.csv')) {
-                    updateLoaderStatus('csv', 'Lecture...', 'amber');
-                    rawCsvData = await file.text();
-                    updateLoaderStatus('csv', 'Chargé manuellement', 'emerald');
-                } else if (name.endsWith('.shp')) {
-                    updateLoaderStatus('shp', 'Lecture...', 'amber');
-                    rawShpData = await file.arrayBuffer();
-                    updateLoaderStatus('shp', 'Chargé manuellement', 'emerald');
-                } else if (name.endsWith('.att')) {
-                    updateLoaderStatus('att', 'Lecture...', 'amber');
-                    rawAttData = await file.text();
-                    updateLoaderStatus('att', 'Chargé manuellement', 'emerald');
-                }
-            }
-            if (rawCsvData && rawShpData && rawAttData) {
-                processData();
-            }
-        }
 
         function updateLoaderStatus(id, text, colorClass) {
             const badge = document.getElementById(`badge-${id}`);
@@ -411,53 +408,44 @@
                 // 1. Parsing du CSV Zone
                 parseZonesCSV(rawCsvData);
                 
-                // 2. Parsing du Shapefile
-                const shapeResult = parseShapefile(rawShpData);
+                // 2. Association des géométries du GeoJSON aux zones correspondantes
+                linkGeoJsonGeometries(rawGeoJsonData);
 
-                // 3. Attribution des formes géométriques aux zones
-                linkGeometries(shapeResult);
-
-                // 4. Parsing de la matrice OD
+                // 3. Parsing de la matrice d'échanges OD
                 parseODMatrix(rawAttData);
 
-                // 5. Agrégation des indicateurs de flux et calcul des communes
+                // 4. Agrégation des flux et calcul des indicateurs communaux
                 aggregateData();
 
-                // 6. Rendu initial de l'application
+                // 5. Masquer l'écran de chargement
                 document.getElementById('loader-overlay').classList.add('opacity-0');
                 setTimeout(() => {
                     document.getElementById('loader-overlay').classList.add('hidden');
                 }, 500);
 
-                // Mettre à jour l'en-tête global
+                // Mettre à jour les indicateurs d'en-tête
                 document.getElementById('header-nb-zones').innerText = zones.length;
                 document.getElementById('header-nb-communes').innerText = communes.length;
                 
                 const totalTripsSum = odMatrix.reduce((sum, d) => sum + d.total, 0);
                 document.getElementById('header-total-trips').innerText = formatNumber(Math.round(totalTripsSum));
 
-                // Centrer la carte sur le bounding box de l'étude
-                if (shapeResult.bbox) {
-                    const center = [
-                        (shapeResult.bbox.ymin + shapeResult.bbox.ymax) / 2,
-                        (shapeResult.bbox.xmin + shapeResult.bbox.xmax) / 2
-                    ];
-                    map.setView(center, 11);
-                }
+                // Positionner et centrer la carte
+                centerMapOnData();
 
-                // Initialiser l'affichage
+                // Initialiser l'affichage thématique par défaut
                 setScale('zone');
                 updateChoropleth();
                 updateTerritoryList();
                 showGlobalStats();
 
             } catch (error) {
-                console.error("Erreur durant le traitement des données :", error);
+                console.error("Erreur durant le traitement :", error);
                 alert("Erreur de parsing des fichiers : " + error.message);
             }
         }
 
-        // Parser CSV des zones
+        // Parseur du fichier CSV ZONE_2025.csv
         function parseZonesCSV(text) {
             zones = [];
             zoneMap = {};
@@ -470,7 +458,7 @@
                 if (!line) continue;
 
                 if (line.includes('Num') && line.includes('COMMUNE')) {
-                    // Nettoyer la ligne d'en-tête (au cas où il y a un préfixe de type "Nombre: 843,")
+                    // Nettoyer d'éventuels préfixes de ligne
                     const cleanedHeader = line.replace(/^Nombre:\s*\d+,/, '');
                     const cols = cleanedHeader.split(',');
                     cols.forEach((col, idx) => {
@@ -482,7 +470,6 @@
 
                 if (headersFound) {
                     const cols = line.split(',');
-                    // Si la ligne commence par un index surnuméraire par rapport aux en-têtes
                     let shift = 0;
                     if (cols.length > Object.keys(headerIndices).length) {
                         shift = cols.length - Object.keys(headerIndices).length;
@@ -507,7 +494,6 @@
                             iris: iris ? iris.trim() : '',
                             geometry: null,
                             centroid: null,
-                            // Totaux cumulés plus tard
                             totalEmis: 0,
                             totalRecus: 0,
                             modes: { walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 },
@@ -522,135 +508,59 @@
             zones.sort((a, b) => a.num - b.num);
         }
 
-        // Parser du Shapefile (.shp uniquement)
-        function parseShapefile(arrayBuffer) {
-            const view = new DataView(arrayBuffer);
-            const fileCode = view.getInt32(0, false);
-            if (fileCode !== 9994) {
-                throw new Error("Ce fichier n'est pas un fichier Shapefile (.shp) valide.");
-            }
+        // Associer les géométries du GeoJSON aux zones lues dans le CSV
+        function linkGeoJsonGeometries(geojsonData) {
+            if (!geojsonData || !geojsonData.features) return;
 
-            const shapeType = view.getInt32(32, true);
-            const rawBbox = {
-                xmin: view.getFloat64(36, true),
-                ymin: view.getFloat64(44, true),
-                xmax: view.getFloat64(52, true),
-                ymax: view.getFloat64(60, true)
-            };
+            geojsonData.features.forEach(feature => {
+                const props = feature.properties || {};
+                let zoneNum = null;
 
-            // Auto-détection de la projection
-            let sourceProj = "EPSG:2154"; // Par défaut Lambert 93
-            if (rawBbox.ymax < 5000000 && rawBbox.ymax > 3000000) {
-                sourceProj = "EPSG:3945"; // CC45 Bordeaux
-            }
-
-            // Conversion du bbox global
-            const convertedMin = convertCoords(rawBbox.xmin, rawBbox.ymin, sourceProj);
-            const convertedMax = convertCoords(rawBbox.xmax, rawBbox.ymax, sourceProj);
-            
-            const bbox = {
-                xmin: convertedMin[1],
-                ymin: convertedMin[0],
-                xmax: convertedMax[1],
-                ymax: convertedMax[0]
-            };
-
-            let offset = 100;
-            const geometries = [];
-
-            while (offset < arrayBuffer.byteLength) {
-                if (offset + 8 > arrayBuffer.byteLength) break;
-                const recordNumber = view.getInt32(offset, false);
-                const contentLength = view.getInt32(offset + 4, false) * 2;
-                const recordStart = offset + 8;
-
-                if (recordStart + contentLength > arrayBuffer.byteLength) break;
-
-                const type = view.getInt32(recordStart, true);
-                
-                // Polygone (Type 5) ou Polyline (Type 3)
-                if (type === 5 || type === 3) {
-                    const numParts = view.getInt32(recordStart + 36, true);
-                    const numPoints = view.getInt32(recordStart + 40, true);
-
-                    const parts = [];
-                    for (let i = 0; i < numParts; i++) {
-                        parts.push(view.getInt32(recordStart + 44 + (i * 4), true));
-                    }
-
-                    const pointsStart = recordStart + 44 + (numParts * 4);
-                    const polygonParts = [];
-
-                    for (let i = 0; i < numParts; i++) {
-                        const start = parts[i];
-                        const end = (i === numParts - 1) ? numPoints : parts[i + 1];
-                        const partCoordinates = [];
-
-                        for (let j = start; j < end; j++) {
-                            const ptOffset = pointsStart + (j * 16);
-                            const x = view.getFloat64(ptOffset, true);
-                            const y = view.getFloat64(ptOffset + 8, true);
-
-                            // Convertir les coordonnées métriques en WGS84
-                            const latLng = convertCoords(x, y, sourceProj);
-                            partCoordinates.push(latLng);
+                // Test de correspondances de clés d'identifiants courantes dans le GeoJSON
+                const possibleKeys = ['Num', 'num', 'NUM', 'ZONENO', 'zoneno', 'ID', 'id', 'OBJECTID', 'objectid', 'NumZone', 'numzone'];
+                for (let key of possibleKeys) {
+                    if (props[key] !== undefined && props[key] !== null) {
+                        const parsed = parseInt(props[key]);
+                        if (!isNaN(parsed) && zoneMap[parsed]) {
+                            zoneNum = parsed;
+                            break;
                         }
-                        polygonParts.push(partCoordinates);
                     }
-
-                    geometries.push({
-                        recordIndex: recordNumber - 1, // 0-indexed
-                        type: type === 5 ? "Polygon" : "Polyline",
-                        coordinates: polygonParts
-                    });
                 }
-                offset = recordStart + contentLength;
-            }
 
-            return { bbox, geometries };
-        }
+                if (zoneNum !== null) {
+                    const zoneObj = zoneMap[zoneNum];
+                    zoneObj.geometry = feature.geometry;
 
-        function convertCoords(x, y, sourceProj) {
-            // Convertir avec Proj4 de Lambert métrique à WGS84 [lng, lat]
-            const [lng, lat] = proj4(sourceProj, "EPSG:4326", [x, y]);
-            return [lat, lng]; // Leaflet requiert [lat, lng]
-        }
-
-        // Associer les formes du SHP aux zones du CSV par ordre d'index
-        function linkGeometries(shapeResult) {
-            const shapes = shapeResult.geometries;
-            
-            // On associe les shapes aux zones dans l'ordre de leur index
-            for (let i = 0; i < zones.length; i++) {
-                if (shapes[i]) {
-                    zones[i].geometry = {
-                        type: "MultiPolygon",
-                        coordinates: shapes[i].type === "Polygon" ? [shapes[i].coordinates] : shapes[i].coordinates
-                    };
-                    // Calcul du centroïde simple
+                    // Calcul simplifié du centre de gravité (centroid) pour poser les lignes de flux
+                    let coords = feature.geometry.coordinates;
                     let sumLat = 0, sumLng = 0, count = 0;
-                    shapes[i].coordinates.forEach(ring => {
-                        ring.forEach(pt => {
-                            sumLat += pt[0];
-                            sumLng += pt[1];
+
+                    function traverseCoords(c) {
+                        if (Array.isArray(c[0])) {
+                            c.forEach(traverseCoords);
+                        } else if (typeof c[0] === 'number' && typeof c[1] === 'number') {
+                            sumLng += c[0]; // GeoJSON utilise [longitude, latitude]
+                            sumLat += c[1];
                             count++;
-                        });
-                    });
+                        }
+                    }
+                    
+                    traverseCoords(coords);
                     if (count > 0) {
-                        zones[i].centroid = [sumLat / count, sumLng / count];
+                        zoneObj.centroid = [sumLat / count, sumLng / count];
                     }
                 }
-            }
+            });
         }
 
-        // Parser pour le fichier ATT (Origine-Destination de Visum)
+        // Parser du fichier matriciel Visum (.att)
         function parseODMatrix(text) {
             odMatrix = [];
             const lines = text.split(/\r?\n/);
 
             for (let line of lines) {
                 line = line.trim();
-                // Ignorer les commentaires et définitions d'en-tête
                 if (!line || line.startsWith('*') || line.startsWith('$')) continue;
 
                 const cols = line.split(';');
@@ -658,7 +568,7 @@
                     const numO = parseInt(cols[0]);
                     const numD = parseInt(cols[1]);
 
-                    // Lecture de la ligne avec conversion des décimales françaises (ex: 1,50 -> 1.5)
+                    // Lecture sécurisée des valeurs décimales au format français
                     const walk = parseFloat(cols[2].replace(',', '.')) || 0;
                     const carPass = parseFloat(cols[5].replace(',', '.')) || 0;
                     const tc = parseFloat(cols[6].replace(',', '.')) || 0;
@@ -667,7 +577,7 @@
                     const pr = parseFloat(cols[9].replace(',', '.')) || 0;
                     const cov = parseFloat(cols[10].replace(',', '.')) || 0;
 
-                    // Formule globale demandée par l'utilisateur
+                    // Formule globale demandée : somme de l'ensemble des modes
                     const total = walk + carPass + tc + carDrive + velo + pr + cov;
 
                     if (total > 0 && !isNaN(numO) && !isNaN(numD)) {
@@ -688,12 +598,12 @@
             }
         }
 
-        // Aggrégation de la matrice au niveau des Zones et création des Communes
+        // Agrégation de la matrice OD au niveau des Zones et constitution des Communes
         function aggregateData() {
             communes = [];
             communeMap = {};
 
-            // 1. Initialiser les compteurs sur chaque zone
+            // 1. Initialiser les compteurs
             zones.forEach(z => {
                 z.totalEmis = 0;
                 z.totalRecus = 0;
@@ -702,7 +612,7 @@
                 z.inflows = [];
             });
 
-            // 2. Traiter la matrice OD et attribuer aux zones d'origine et de destination
+            // 2. Traiter et attribuer la matrice OD aux zones
             odMatrix.forEach(flow => {
                 const zoneO = zoneMap[flow.from];
                 const zoneD = zoneMap[flow.to];
@@ -725,7 +635,7 @@
                 }
             });
 
-            // 3. Agrégation par COMMUNE
+            // 3. Constitution des communes
             zones.forEach(zone => {
                 const comName = zone.commune;
                 if (!communeMap[comName]) {
@@ -739,8 +649,8 @@
                         modes: { walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 },
                         geometryList: [],
                         centroid: null,
-                        outflows: {}, // Vers d'autres communes
-                        inflows: {}   // Depuis d'autres communes
+                        outflows: {}, 
+                        inflows: {}   
                     };
                     communes.push(communeMap[comName]);
                 }
@@ -752,7 +662,7 @@
                 com.totalEmis += zone.totalEmis;
                 com.totalRecus += zone.totalRecus;
 
-                // Ajouter les modes de transport cumulés
+                // Consolidation des volumes de déplacements
                 com.modes.walk += zone.modes.walk;
                 com.modes.carPass += zone.modes.carPass;
                 com.modes.tc += zone.modes.tc;
@@ -766,7 +676,7 @@
                 }
             });
 
-            // Calcul du centroïde moyen de chaque commune
+            // Calcul du centroïde général pour chaque commune
             communes.forEach(com => {
                 let sumLat = 0, sumLng = 0, count = 0;
                 com.zones.forEach(z => {
@@ -781,7 +691,7 @@
                 }
             });
 
-            // Agrégation des flux OD à l'échelle communale
+            // Agrégation des liaisons inter-communes
             odMatrix.forEach(flow => {
                 const zoneO = zoneMap[flow.from];
                 const zoneD = zoneMap[flow.to];
@@ -814,17 +724,30 @@
             });
         }
 
+        // Centrer dynamiquement la carte sur l'étendue des données
+        function centerMapOnData() {
+            let sumLat = 0, sumLng = 0, count = 0;
+            zones.forEach(z => {
+                if (z.centroid) {
+                    sumLat += z.centroid[0];
+                    sumLng += z.centroid[1];
+                    count++;
+                }
+            });
+            if (count > 0) {
+                map.setView([sumLat / count, sumLng / count], 11);
+            } else {
+                map.setView([44.8378, -0.5792], 11); // Position de repli sur Bordeaux
+            }
+        }
+
         // ----------------- CARTOGRAPHIE INITIALISATION -----------------
         function initMap() {
-            map = L.map('map', {
-                zoomControl: false
-            }).setView([44.8378, -0.5792], 11);
-
+            map = L.map('map', { zoomControl: false }).setView([44.8378, -0.5792], 11);
             L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
-            // Fond de carte sombre minimaliste pour faire ressortir les flux
             baseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
                 subdomains: 'abcd',
                 maxZoom: 20
             }).addTo(map);
@@ -834,10 +757,9 @@
             activeSelectionLayer = L.layerGroup().addTo(map);
         }
 
-        // Définir l'échelle active (Zone ou Commune)
         function setScale(scale) {
             currentScale = scale;
-            activeODTerritory = null; // Réinitialise l'OD
+            activeODTerritory = null;
             document.getElementById('od-controls').classList.add('hidden');
             document.getElementById('od-setup-tip').classList.remove('hidden');
             document.getElementById('btn-clear-od').classList.add('hidden');
@@ -861,14 +783,15 @@
         }
 
         // ----------------- ANALYSE CHROMATIQUE & CHOROPLÈTHE -----------------
-        // Gammes de couleurs
         const colorScales = {
             pop: ['#edf8fb', '#b2e2e2', '#66c2a4', '#2ca25f', '#006d2c'],
             emplois: ['#f2f0f7', '#d7b5d8', '#df65b0', '#dd1c77', '#980043'],
             emis: ['#fef0d9', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000'],
             recus: ['#f0f9e8', '#bae4bc', '#7bccc4', '#43a2ca', '#0868ac'],
             pm_car: ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15'],
-            pm_tc: ['#e5f5e0', '#a1d99b', '#74c476', '#31a354', '#006d2c']
+            pm_tc: ['#e5f5e0', '#a1d99b', '#74c476', '#31a354', '#006d2c'],
+            pm_marche: ['#e0f3db', '#a8ddb5', '#7bccc4', '#4eb3d3', '#084081'],
+            pm_velo: ['#fde0ef', '#f1b6da', '#de77ae', '#c51b7d', '#8e0152']
         };
 
         function getColor(value, scaleName, min, max) {
@@ -893,6 +816,10 @@
                 case 'pm_tc':
                     const totalTc = item.modes.tc + item.modes.pr;
                     return totModes > 0 ? (totalTc / totModes) * 100 : 0;
+                case 'pm_marche':
+                    return totModes > 0 ? (item.modes.walk / totModes) * 100 : 0;
+                case 'pm_velo':
+                    return totModes > 0 ? (item.modes.velo / totModes) * 100 : 0;
                 default: return 0;
             }
         }
@@ -903,7 +830,6 @@
 
             const collection = currentScale === 'zone' ? zones : communes;
 
-            // Déterminer Min et Max de la variable sélectionnée
             let min = Infinity, max = -Infinity;
             collection.forEach(item => {
                 const val = getTerritoryValue(item, currentMapVariable);
@@ -913,14 +839,12 @@
 
             if (min === Infinity) { min = 0; max = 100; }
 
-            // Dessiner chaque territoire
             collection.forEach(item => {
                 if (currentScale === 'zone') {
                     if (item.geometry) {
                         drawPolygon(item.geometry, item, min, max);
                     }
                 } else {
-                    // Commune (composée de multiples géométries de zones)
                     item.geometryList.forEach(geom => {
                         drawPolygon(geom, item, min, max);
                     });
@@ -934,7 +858,6 @@
             const value = getTerritoryValue(item, currentMapVariable);
             const fillColor = currentMapVariable === 'none' ? '#cbd5e1' : getColor(value, currentMapVariable, min, max);
 
-            // Formater l'info-bulle du survol
             let tooltipText = `<b>${item.nom}</b><br/>`;
             if (currentScale === 'zone') {
                 tooltipText += `<span class="text-xs text-slate-500">Commune: ${item.commune}</span><br/>`;
@@ -942,7 +865,7 @@
             if (currentMapVariable !== 'none') {
                 let displayVal = formatNumber(Math.round(value));
                 if (currentMapVariable.startsWith('pm_')) displayVal += " %";
-                tooltipText += `<span class="font-semibold text-emerald-600">${getVarLabel(currentMapVariable)}: ${displayVal}</span>`;
+                tooltipText += `<span class="font-semibold text-emerald-600">${getVarLabel(currentMapVariable)} : ${displayVal}</span>`;
             }
 
             const polygon = L.geoJSON(geometry, {
@@ -982,11 +905,12 @@
                 case 'recus': return 'Flux reçus';
                 case 'pm_car': return 'Part Voiture';
                 case 'pm_tc': return 'Part Transports en Commun';
+                case 'pm_marche': return 'Part Marche à pied';
+                case 'pm_velo': return 'Part Vélo';
                 default: return '';
             }
         }
 
-        // Légende Cartographique
         function updateLegend(min, max) {
             const legendTitle = document.getElementById('legend-title');
             const legendColors = document.getElementById('legend-colors');
@@ -1024,19 +948,17 @@
             }
         }
 
-        // ----------------- ANALYSE ET SÉLECTION D'UN TERRITOIRE -----------------
+        // ----------------- SELECTION ET ETUDE DU DETAIL -----------------
         function selectTerritory(item) {
             activeODTerritory = item;
 
-            // Activer la visibilité des contrôles de flux
             document.getElementById('od-setup-tip').classList.add('hidden');
             document.getElementById('od-controls').classList.remove('hidden');
             document.getElementById('btn-clear-od').classList.remove('hidden');
 
-            // Mettre en valeur visuellement le territoire sélectionné sur la carte
             activeSelectionLayer.clearLayers();
             if (item.centroid) {
-                const marker = L.circleMarker(item.centroid, {
+                L.circleMarker(item.centroid, {
                     radius: 8,
                     fillColor: '#f59e0b',
                     color: '#ffffff',
@@ -1046,10 +968,7 @@
                 }).addTo(activeSelectionLayer);
             }
 
-            // Mettre à jour la fiche statistique (Sidebar droite)
             updateStatsSidebar(item);
-
-            // Tracer les flux
             drawODFlows();
         }
 
@@ -1092,7 +1011,7 @@
             showGlobalStats();
         }
 
-        // ----------------- TRACÉ DES FLUX ORIGINE-DESTINATION (OD) -----------------
+        // ----------------- TRACE DES LIGNES DE DESIRABILITE -----------------
         function drawODFlows() {
             odFlowsLayer.clearLayers();
             if (!activeODTerritory) return;
@@ -1101,23 +1020,15 @@
             const isZone = currentScale === 'zone';
 
             if (isZone) {
-                // Échelle Zones
-                if (activeODDirection === 'out') {
-                    flows = activeODTerritory.outflows;
-                } else {
-                    flows = activeODTerritory.inflows;
-                }
+                flows = activeODDirection === 'out' ? activeODTerritory.outflows : activeODTerritory.inflows;
             } else {
-                // Échelle Communes
                 const rawFlows = activeODDirection === 'out' ? activeODTerritory.outflows : activeODTerritory.inflows;
                 flows = Object.values(rawFlows);
             }
 
-            // Filtrer par le seuil défini
             const filteredFlows = flows.filter(f => f.total >= fluxThreshold && f.from !== f.to);
             document.getElementById('od-displayed-count').innerText = filteredFlows.length;
 
-            // Déterminer le flux max pour adapter l'épaisseur
             let maxTotal = 0;
             filteredFlows.forEach(f => { if (f.total > maxTotal) maxTotal = f.total; });
 
@@ -1145,24 +1056,22 @@
                 }
 
                 if (startCentroid && endCentroid) {
-                    // Calcul de l'épaisseur proportionnelle (max 7px, min 1px)
                     const weight = maxTotal > 0 ? 1 + (flow.total / maxTotal) * 6 : 2;
 
-                    // Couleur thématique selon le mode dominant du flux
-                    let strokeColor = '#64748b'; // Défaut
-                    const tcTotal = flow.tc + flow.pr;
+                    // Couleur thématique selon le mode majoritaire du flux
+                    let strokeColor = '#64748b';
                     const carTotal = flow.carDrive + flow.carPass + flow.cov;
-                    const activeTotal = flow.walk + flow.velo;
+                    const tcTotal = flow.tc + flow.pr;
+                    const walkTotal = flow.walk;
+                    const veloTotal = flow.velo;
 
-                    if (carTotal > tcTotal && carTotal > activeTotal) {
-                        strokeColor = '#f59e0b'; // Jaune/Orange pour la Voiture
-                    } else if (tcTotal > carTotal && tcTotal > activeTotal) {
-                        strokeColor = '#10b981'; // Vert pour les Transports Publics
-                    } else if (activeTotal > carTotal && activeTotal > tcTotal) {
-                        strokeColor = '#ec4899'; // Rose pour les Modes Doux (Marche, vélo)
-                    }
+                    const maxModeVal = Math.max(carTotal, tcTotal, walkTotal, veloTotal);
 
-                    // Tracé de la ligne avec flèche directionnelle
+                    if (maxModeVal === carTotal) strokeColor = '#ef4444';      // Rouge Voiture
+                    else if (maxModeVal === tcTotal) strokeColor = '#10b981';  // Vert Transports en commun
+                    else if (maxModeVal === walkTotal) strokeColor = '#3b82f6'; // Bleu Marche
+                    else if (maxModeVal === veloTotal) strokeColor = '#d946ef'; // Magenta Vélo
+
                     const polyline = L.polyline([startCentroid, endCentroid], {
                         color: strokeColor,
                         weight: weight,
@@ -1170,26 +1079,26 @@
                         dashArray: activeODDirection === 'in' ? '5, 5' : null
                     });
 
-                    // Infobulle de flux
-                    const txt = `
+                    const popupContent = `
                         <div class="font-sans text-xs space-y-1.5 p-1 bg-white text-slate-800">
-                            <div class="font-bold border-b pb-1 text-[11px]">${labelO} <i data-lucide="arrow-right" class="inline-block w-3 h-3 mx-0.5"></i> ${labelD}</div>
-                            <div>Déplacements totaux : <b class="text-emerald-600">${Math.round(flow.total)}</b></div>
+                            <div class="font-bold border-b pb-1 text-[11px]">${labelO} → ${labelD}</div>
+                            <div>Volume de trajets : <b class="text-emerald-600">${Math.round(flow.total)}</b></div>
                             <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
-                                <span>• Voiture (con. + pas.) :</span> <span>${Math.round(flow.carDrive + flow.carPass + flow.cov)}</span>
-                                <span>• Transports en commun :</span> <span>${Math.round(flow.tc + flow.pr)}</span>
-                                <span>• Vélo / Marche :</span> <span>${Math.round(flow.velo + flow.walk)}</span>
+                                <span>• Voiture (Voi.) :</span> <span>${Math.round(carTotal)}</span>
+                                <span>• Transports (TC) :</span> <span>${Math.round(tcTotal)}</span>
+                                <span>• Marche (MaP) :</span> <span>${Math.round(walkTotal)}</span>
+                                <span>• Vélo :</span> <span>${Math.round(veloTotal)}</span>
                             </div>
                         </div>
                     `;
 
-                    polyline.bindTooltip(txt, { sticky: true, className: 'rounded border border-slate-200 shadow-md bg-white' });
+                    polyline.bindTooltip(popupContent, { sticky: true, className: 'rounded border border-slate-200 shadow-md bg-white' });
                     odFlowsLayer.addLayer(polyline);
                 }
             });
         }
 
-        // ----------------- TABLEAUX DE BORD STATISTIQUES (SIDEBAR DROITE) -----------------
+        // ----------------- GRAPHIQUES ET CUMULS STATISTIQUES -----------------
         function initEmptyChart() {
             const ctx = document.getElementById('modalChart').getContext('2d');
             modalChartInstance = new Chart(ctx, {
@@ -1198,7 +1107,7 @@
                     labels: ['Voiture', 'Transports en Commun', 'Marche à Pied', 'Vélo'],
                     datasets: [{
                         data: [0, 0, 0, 0],
-                        backgroundColor: ['#f59e0b', '#10b981', '#3b82f6', '#ec4899'],
+                        backgroundColor: ['#ef4444', '#10b981', '#3b82f6', '#d946ef'],
                         borderWidth: 1
                     }]
                 },
@@ -1206,22 +1115,18 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            display: false // Légende gérée à la main en HTML pour une interface épurée
-                        }
+                        legend: { display: false }
                     },
                     cutout: '70%'
                 }
             });
         }
 
-        // Statistiques globales de la Métropole complète
         function showGlobalStats() {
             document.getElementById('selected-name').innerText = "Métropole Complète";
             document.getElementById('selected-sub').innerHTML = `<i data-lucide="globe" class="w-3.5 h-3.5"></i> Analyse globale agrégée`;
             document.getElementById('selected-type-badge').innerText = currentScale === 'zone' ? "843 Zones" : "Communes";
 
-            // Cumuler les données de toutes les zones
             let totalPop = 0, totalEmplois = 0, totalEmis = 0, totalRecus = 0;
             const modes = { walk: 0, carPass: 0, tc: 0, carDrive: 0, velo: 0, pr: 0, cov: 0 };
 
@@ -1236,7 +1141,6 @@
                 }
             });
 
-            // Affichage des chiffres clés
             document.getElementById('stat-pop').innerText = formatNumber(totalPop);
             document.getElementById('stat-emplois').innerText = formatNumber(totalEmplois);
             document.getElementById('stat-total-emis').innerText = formatNumber(Math.round(totalEmis));
@@ -1251,9 +1155,9 @@
             document.getElementById('selected-type-badge').innerText = currentScale === 'zone' ? `Zone ${item.num}` : "Commune";
             
             if (currentScale === 'zone') {
-                document.getElementById('selected-sub').innerHTML = `<i data-lucide="map-pin" class="w-3.5 h-3.5"></i> Commune de raccordement : ${item.commune}`;
+                document.getElementById('selected-sub').innerHTML = `<i data-lucide="map-pin" class="w-3.5 h-3.5"></i> Commune d'appartenance : ${item.commune}`;
             } else {
-                document.getElementById('selected-sub').innerHTML = `<i data-lucide="layers" class="w-3.5 h-3.5"></i> Agglomération de ${item.zones.length} zones de trafic`;
+                document.getElementById('selected-sub').innerHTML = `<i data-lucide="layers" class="w-3.5 h-3.5"></i> Regroupement de ${item.zones.length} zones`;
             }
 
             document.getElementById('stat-pop').innerText = formatNumber(item.pop);
@@ -1265,7 +1169,6 @@
             updateTopExchangesTable(item);
         }
 
-        // Mettre à jour le graphique dynamique
         function updateChart(modes) {
             const voiture = modes.carDrive + modes.carPass + modes.cov;
             const tc = modes.tc + modes.pr;
@@ -1277,21 +1180,26 @@
             if (total > 0) {
                 const pctVoiture = ((voiture / total) * 100).toFixed(1);
                 const pctTC = ((tc / total) * 100).toFixed(1);
+                const pctMarche = ((walk / total) * 100).toFixed(1);
+                const pctVelo = ((velo / total) * 100).toFixed(1);
                 
                 document.getElementById('pm-val-voiture').innerText = `${pctVoiture} %`;
                 document.getElementById('pm-val-tc').innerText = `${pctTC} %`;
+                document.getElementById('pm-val-marche').innerText = `${pctMarche} %`;
+                document.getElementById('pm-val-velo').innerText = `${pctVelo} %`;
 
                 modalChartInstance.data.datasets[0].data = [voiture, tc, walk, velo];
                 modalChartInstance.update();
             } else {
                 document.getElementById('pm-val-voiture').innerText = "0.0 %";
                 document.getElementById('pm-val-tc').innerText = "0.0 %";
+                document.getElementById('pm-val-marche').innerText = "0.0 %";
+                document.getElementById('pm-val-velo').innerText = "0.0 %";
                 modalChartInstance.data.datasets[0].data = [0, 0, 0, 0];
                 modalChartInstance.update();
             }
         }
 
-        // Mettre à jour le tableau des liaisons majeures
         function updateTopExchangesTable(item) {
             const tbody = document.getElementById('top-od-tbody');
             tbody.innerHTML = "";
@@ -1299,11 +1207,9 @@
             let exchanges = [];
 
             if (!item) {
-                // Métropole globale - lister les flux les plus massifs existants
                 if (currentScale === 'zone') {
                     exchanges = [...odMatrix];
                 } else {
-                    // Agrégation communale globale
                     communes.forEach(c => {
                         Object.values(c.outflows).forEach(flow => {
                             exchanges.push(flow);
@@ -1311,7 +1217,6 @@
                     });
                 }
             } else {
-                // Territoire individuel sélectionné
                 if (currentScale === 'zone') {
                     exchanges = activeODDirection === 'out' ? [...item.outflows] : [...item.inflows];
                 } else {
@@ -1320,30 +1225,24 @@
                 }
             }
 
-            // Exclure les trajets intra-zone / intra-commune pour plus de sens analytique
             exchanges = exchanges.filter(e => e.from !== e.to);
-
-            // Trier par volume décroissant
             exchanges.sort((a, b) => b.total - a.total);
 
-            // Prendre le top 5
             const top5 = exchanges.slice(0, 5);
 
             if (top5.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" class="px-3 py-4 text-center text-slate-400 italic">Aucun flux enregistré</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="px-3 py-4 text-center text-slate-400 italic">Aucun échange majeur</td></tr>`;
                 return;
             }
 
             top5.forEach(e => {
                 let name = "";
                 if (currentScale === 'zone') {
-                    // On affiche la zone cible
                     const targetNum = activeODDirection === 'out' ? e.to : e.from;
                     const targetZone = zoneMap[targetNum];
                     name = targetZone ? targetZone.nom : `Zone ${targetNum}`;
                 } else {
-                    const targetName = activeODDirection === 'out' ? e.to : e.from;
-                    name = targetName;
+                    name = activeODDirection === 'out' ? e.to : e.from;
                 }
 
                 const totalCar = e.carDrive + e.carPass + e.cov;
@@ -1351,6 +1250,7 @@
                 
                 const voiPct = e.total > 0 ? Math.round((totalCar / e.total) * 100) : 0;
                 const tcPct = e.total > 0 ? Math.round((totalTc / e.total) * 100) : 0;
+                const velPct = e.total > 0 ? Math.round((e.velo / e.total) * 100) : 0;
 
                 const tr = document.createElement('tr');
                 tr.className = "hover:bg-slate-50 transition cursor-pointer";
@@ -1365,16 +1265,17 @@
                 };
 
                 tr.innerHTML = `
-                    <td class="px-3 py-2 font-medium text-slate-800 max-w-[140px] truncate" title="${name}">${name}</td>
-                    <td class="px-3 py-2 text-right font-semibold text-emerald-600">${Math.round(e.total)}</td>
-                    <td class="px-3 py-2 text-right text-amber-600 font-medium">${voiPct}%</td>
-                    <td class="px-3 py-2 text-right text-emerald-600 font-medium">${tcPct}%</td>
+                    <td class="px-3 py-2 font-medium text-slate-800 max-w-[120px] truncate" title="${name}">${name}</td>
+                    <td class="px-3 py-2 text-right font-semibold text-slate-900">${Math.round(e.total)}</td>
+                    <td class="px-3 py-2 text-right text-red-500 font-semibold">${voiPct}%</td>
+                    <td class="px-3 py-2 text-right text-emerald-600 font-semibold">${tcPct}%</td>
+                    <td class="px-3 py-2 text-right text-fuchsia-600 font-semibold">${velPct}%</td>
                 `;
                 tbody.appendChild(tr);
             });
         }
 
-        // ----------------- BARRE DE RECHERCHE & NAVIGATION LATÉRALE -----------------
+        // ----------------- LISTE DE RECHERCHE LATÉRALE -----------------
         function updateTerritoryList() {
             const container = document.getElementById('territory-list');
             container.innerHTML = "";
@@ -1383,10 +1284,9 @@
 
             collection.forEach(item => {
                 const itemDiv = document.createElement('div');
-                itemDiv.className = "flex justify-between items-center p-2 rounded-md hover:bg-slate-100 transition cursor-pointer text-xs border border-transparent";
+                itemDiv.className = "flex justify-between items-center p-2.5 rounded-md hover:bg-slate-100 transition cursor-pointer text-xs border border-transparent";
                 itemDiv.id = `sidebar-item-${currentScale === 'zone' ? item.num : item.nom}`;
                 
-                // Mettre en gras et fond coloré si sélectionné
                 if (activeODTerritory && ((currentScale === 'zone' && activeODTerritory.num === item.num) || (currentScale === 'commune' && activeODTerritory.nom === item.nom))) {
                     itemDiv.className += " bg-emerald-50 border-emerald-200 font-semibold text-emerald-800";
                 }
@@ -1395,7 +1295,7 @@
                 if (currentScale === 'zone') {
                     subText = `<span class="text-[10px] text-slate-400 block">${item.commune}</span>`;
                 } else {
-                    subText = `<span class="text-[10px] text-slate-400 block">${item.zones.length} zones</span>`;
+                    subText = `<span class="text-[10px] text-slate-400 block">${item.zones.length} zones territoriales</span>`;
                 }
 
                 itemDiv.innerHTML = `
@@ -1410,13 +1310,9 @@
 
                 itemDiv.onclick = () => {
                     selectTerritory(item);
-                    
-                    // Centrer la carte sur son centroïde
                     if (item.centroid) {
                         map.setView(item.centroid, currentScale === 'zone' ? 13 : 12);
                     }
-
-                    // Mettre à jour le surlignage dans la liste latérale
                     updateTerritoryListHighlight();
                 };
 
@@ -1431,15 +1327,14 @@
                 const el = document.getElementById(id);
                 if (el) {
                     if (activeODTerritory && ((currentScale === 'zone' && activeODTerritory.num === item.num) || (currentScale === 'commune' && activeODTerritory.nom === item.nom))) {
-                        el.className = "flex justify-between items-center p-2 rounded-md transition cursor-pointer text-xs border bg-emerald-50 border-emerald-200 font-semibold text-emerald-800";
+                        el.className = "flex justify-between items-center p-2.5 rounded-md transition cursor-pointer text-xs border bg-emerald-50 border-emerald-200 font-semibold text-emerald-800";
                     } else {
-                        el.className = "flex justify-between items-center p-2 rounded-md hover:bg-slate-100 transition cursor-pointer text-xs border border-transparent text-slate-600";
+                        el.className = "flex justify-between items-center p-2.5 rounded-md hover:bg-slate-100 transition cursor-pointer text-xs border border-transparent text-slate-600";
                     }
                 }
             });
         }
 
-        // Filtre de la barre de recherche
         function filterTerritories() {
             const query = document.getElementById('search-input').value.toLowerCase().trim();
             const collection = currentScale === 'zone' ? zones : communes;
@@ -1460,7 +1355,6 @@
             });
         }
 
-        // Formateur d'écritures de nombres (séparateurs de milliers)
         function formatNumber(num) {
             return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
         }
